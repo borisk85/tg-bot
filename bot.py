@@ -7,6 +7,7 @@ from anthropic import Anthropic
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
+import requests
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -81,6 +82,17 @@ TOOLS = [
         }
     },
     {
+        "name": "web_search",
+        "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Поисковый запрос"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
         "name": "calendar_delete_event",
         "description": "Удаляет событие из Google Calendar по названию и дате.",
         "input_schema": {
@@ -103,6 +115,22 @@ def execute_tool(name: str, tool_input: dict) -> str:
         now = datetime.now()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         return f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')}"
+
+    if name == "web_search":
+        try:
+            query = tool_input["query"]
+            headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": os.getenv("BRAVE_API_KEY")}
+            resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params={"q": query, "count": 5})
+            data = resp.json()
+            results = data.get("web", {}).get("results", [])
+            if not results:
+                return "Ничего не найдено."
+            output = []
+            for r in results[:5]:
+                output.append(f"**{r['title']}**\n{r.get('description', '')}\n{r['url']}")
+            return "\n\n".join(output)
+        except Exception as e:
+            return f"Ошибка поиска: {e}"
 
     if name == "calendar_list_events":
         try:
