@@ -57,6 +57,16 @@ def clear_history(user_id: int):
     else:
         conversations[user_id] = []
 
+def get_reminders(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"reminders:{user_id}")
+        return json.loads(data) if data else []
+    return []
+
+def save_reminders(user_id: int, reminders: list):
+    if redis_client:
+        redis_client.set(f"reminders:{user_id}", json.dumps(reminders, ensure_ascii=False))
+
 def serialize_messages(messages: list) -> list:
     """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
     result = []
@@ -250,6 +260,34 @@ TOOLS = [
         }
     },
     {
+        "name": "reminder_set",
+        "description": "Устанавливает напоминание. Бот напишет пользователю в указанное время. Используй когда просят напомнить через N минут/часов или в конкретное время/дату.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Текст напоминания"},
+                "datetime": {"type": "string", "description": "Когда напомнить — ISO формат YYYY-MM-DDTHH:MM или относительно: '+30m', '+2h', '+1d'"}
+            },
+            "required": ["text", "datetime"]
+        }
+    },
+    {
+        "name": "reminder_list",
+        "description": "Показывает все активные напоминания пользователя.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "reminder_cancel",
+        "description": "Отменяет напоминание по номеру из списка.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"}
+            },
+            "required": ["index"]
+        }
+    },
+    {
         "name": "get_token_info",
         "description": "Получает информацию о токене по адресу контракта (Solana, ETH, BSC и др.) через Dexscreener. Используй когда дают адрес контракта.",
         "input_schema": {
@@ -357,7 +395,7 @@ TOOLS = [
 
 # ── Tool execution ────────────────────────────────────────────────────────────
 
-def execute_tool(name: str, tool_input: dict) -> str:
+def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     logger.info(f"Tool: {name}({json.dumps(tool_input, ensure_ascii=False)})")
 
     if name == "get_current_datetime":
@@ -476,6 +514,60 @@ def execute_tool(name: str, tool_input: dict) -> str:
             ids = [m["id"] for m in messages]
             service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
             return f"Спам очищен: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "reminder_set":
+        try:
+            import re
+            text = tool_input["text"]
+            dt_str = tool_input["datetime"]
+            now = datetime.now()
+
+            if dt_str.startswith("+"):
+                match = re.match(r'\+(\d+)([mhd])', dt_str)
+                if match:
+                    val, unit = int(match.group(1)), match.group(2)
+                    from datetime import timedelta
+                    delta = {"m": timedelta(minutes=val), "h": timedelta(hours=val), "d": timedelta(days=val)}[unit]
+                    remind_at = now + delta
+                else:
+                    return "Неверный формат времени. Используй +30m, +2h, +1d или YYYY-MM-DDTHH:MM"
+            else:
+                remind_at = datetime.fromisoformat(dt_str)
+
+            reminders = get_reminders(user_id)
+            reminders.append({"text": text, "at": remind_at.isoformat(), "done": False})
+            save_reminders(user_id, reminders)
+            return f"Напоминание установлено на {remind_at.strftime('%d.%m.%Y %H:%M')}: {text}"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "reminder_list":
+        try:
+            reminders = get_reminders(user_id)
+            active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
+            if not active:
+                return "Активных напоминаний нет."
+            lines = []
+            for i, r in active:
+                dt = datetime.fromisoformat(r["at"]).strftime("%d.%m %H:%M")
+                lines.append(f"{i+1}. {dt} — {r['text']}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "reminder_cancel":
+        try:
+            reminders = get_reminders(user_id)
+            idx = tool_input["index"] - 1
+            active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
+            if idx < 0 or idx >= len(active):
+                return "Напоминание не найдено."
+            real_idx, r = active[idx]
+            reminders[real_idx]["done"] = True
+            save_reminders(user_id, reminders)
+            return f"Напоминание отменено: {r['text']}"
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -878,7 +970,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> st
             tool_results = []
             for block in assistant_content:
                 if block.type == "tool_use":
-                    result = execute_tool(block.name, block.input)
+                    result = execute_tool(block.name, block.input, user_id)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -893,6 +985,26 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> st
     return "Не удалось получить ответ."
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
+
+async def check_reminders(context):
+    if not redis_client:
+        return
+    now = datetime.now()
+    # Сканируем все ключи напоминаний
+    for key in redis_client.scan_iter("reminders:*"):
+        user_id = int(key.split(":")[1])
+        reminders = get_reminders(user_id)
+        changed = False
+        for r in reminders:
+            if not r.get("done") and datetime.fromisoformat(r["at"]) <= now:
+                r["done"] = True
+                changed = True
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=f"Напоминание: {r['text']}")
+                except Exception as e:
+                    logger.error(f"Ошибка отправки напоминания: {e}")
+        if changed:
+            save_reminders(user_id, reminders)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
@@ -947,6 +1059,7 @@ def main():
         raise ValueError("TELEGRAM_TOKEN не задан в .env")
 
     app = Application.builder().token(token).build()
+    app.job_queue.run_repeating(check_reminders, interval=60, first=10)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.IMAGE) & ~filters.COMMAND, handle_message))
