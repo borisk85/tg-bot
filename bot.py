@@ -138,6 +138,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 При создании событий используй временную зону Asia/Almaty (UTC+5) если не указано другое.
 Когда показываешь события — форматируй красиво, с датой и временем.
 
+Правило: если результат инструмента начинается с TRANSCRIPT: — это транскрипт YouTube видео. Сделай краткое резюме на русском: о чём видео, ключевые мысли, выводы. Без лишней воды.
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. Промпт переводи на английский.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
@@ -404,6 +405,17 @@ TOOLS = [
                 "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"}
             },
             "required": ["index"]
+        }
+    },
+    {
+        "name": "youtube_summary",
+        "description": "Получает транскрипт YouTube видео и делает резюме. Используй когда пользователь кидает ссылку на YouTube и просит краткое содержание, резюме, о чём видео.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Ссылка на YouTube видео"}
+            },
+            "required": ["url"]
         }
     },
     {
@@ -842,6 +854,30 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return f"Напоминание отменено: {r['text']}"
         except Exception as e:
             return f"Ошибка: {e}"
+
+    if name == "youtube_summary":
+        try:
+            import re
+            url = tool_input["url"]
+            match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", url)
+            if not match:
+                return "Не удалось извлечь ID видео из ссылки."
+            video_id = match.group(1)
+
+            from youtube_transcript_api import YouTubeTranscriptApi
+            # Пробуем русский, потом английский
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["ru"])
+            except:
+                try:
+                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+                except:
+                    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+
+            text = " ".join(t["text"] for t in transcript)[:8000]
+            return f"TRANSCRIPT:{text}"
+        except Exception as e:
+            return f"Не удалось получить транскрипт: {e}"
 
     if name == "get_token_info":
         try:
