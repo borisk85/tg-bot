@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 import requests
+import redis
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -20,7 +21,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+# ── Redis для хранения истории ────────────────────────────────────────────────
+
+redis_client = None
+try:
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        redis_client.ping()
+        logger.info("Redis подключён")
+    else:
+        logger.info("REDIS_URL не задан — используем память")
+except Exception as e:
+    logger.warning(f"Redis недоступен, используем память: {e}")
+    redis_client = None
+
 conversations: dict[int, list] = {}
+
+def get_history(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"conv:{user_id}")
+        return json.loads(data) if data else []
+    return conversations.get(user_id, [])
+
+def set_history(user_id: int, history: list):
+    if redis_client:
+        redis_client.setex(f"conv:{user_id}", 60*60*24*7, json.dumps(history, ensure_ascii=False))
+    else:
+        conversations[user_id] = history
+
+def clear_history(user_id: int):
+    if redis_client:
+        redis_client.delete(f"conv:{user_id}")
+    else:
+        conversations[user_id] = []
 
 # ── Google Calendar client ────────────────────────────────────────────────────
 
@@ -235,15 +270,13 @@ def execute_tool(name: str, tool_input: dict) -> str:
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
 async def run_agent(user_id: int, user_text: str) -> str:
-    if user_id not in conversations:
-        conversations[user_id] = []
+    history = get_history(user_id)
+    history.append({"role": "user", "content": user_text})
 
-    conversations[user_id].append({"role": "user", "content": user_text})
+    if len(history) > 40:
+        history = history[-40:]
 
-    if len(conversations[user_id]) > 40:
-        conversations[user_id] = conversations[user_id][-40:]
-
-    messages = list(conversations[user_id])
+    messages = list(history)
     now = datetime.now()
     days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
     system = SYSTEM_PROMPT.format(
@@ -267,7 +300,7 @@ async def run_agent(user_id: int, user_text: str) -> str:
                 block.text for block in assistant_content
                 if hasattr(block, "text")
             )
-            conversations[user_id] = messages
+            set_history(user_id, messages)
             return text or "Готово."
 
         if response.stop_reason == "tool_use":
@@ -285,13 +318,13 @@ async def run_agent(user_id: int, user_text: str) -> str:
 
         break
 
-    conversations[user_id] = messages
+    set_history(user_id, messages)
     return "Не удалось получить ответ."
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conversations[update.effective_user.id] = []
+    clear_history(update.effective_user.id)
     await update.message.reply_text(
         "Привет! Я твой личный ИИ-агент на базе Claude.\n\n"
         "Что умею:\n"
@@ -305,7 +338,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conversations[update.effective_user.id] = []
+    clear_history(update.effective_user.id)
     await update.message.reply_text("История очищена.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
