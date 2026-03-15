@@ -1262,34 +1262,19 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def send_voice_reminder(bot, user_id: int, text: str):
-    """Отправляет голосовое напоминание через ElevenLabs, fallback на текст."""
+    """Отправляет голосовое напоминание через gTTS, fallback на текст."""
     import io
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: ELEVENLABS_API_KEY не найден]")
-        return
     try:
-        voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel
-        resp = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "text": f"Напоминание: {text}",
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
-            }
-        )
-        if resp.status_code == 200:
-            audio = io.BytesIO(resp.content)
-            audio.name = "reminder.mp3"
-            await bot.send_audio(chat_id=user_id, audio=audio, title=f"Напоминание: {text}", performer="Бот")
-        else:
-            err = f"ElevenLabs {resp.status_code}: {resp.text[:200]}"
-            logger.error(err)
-            await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: {err}]")
+        from gtts import gTTS
+        tts = gTTS(text=f"Напоминание: {text}", lang="ru")
+        audio = io.BytesIO()
+        tts.write_to_fp(audio)
+        audio.seek(0)
+        audio.name = "reminder.mp3"
+        await bot.send_audio(chat_id=user_id, audio=audio, title=f"Напоминание: {text}", performer="Бот")
     except Exception as e:
-        logger.error(f"ElevenLabs ошибка: {e}")
-        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: {e}]")
+        logger.error(f"gTTS ошибка: {e}")
+        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
 
 async def check_reminders(context):
     if not redis_client:
