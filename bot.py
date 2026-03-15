@@ -292,6 +292,30 @@ TOOLS = [
         }
     },
     {
+        "name": "drive_create_folder",
+        "description": "Создаёт папку в Google Drive.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Название папки"},
+                "parent_id": {"type": "string", "description": "ID родительской папки (необязательно, по умолчанию корень)"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "drive_move_file",
+        "description": "Перемещает файл в другую папку в Google Drive.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "ID файла"},
+                "folder_id": {"type": "string", "description": "ID папки назначения"}
+            },
+            "required": ["file_id", "folder_id"]
+        }
+    },
+    {
         "name": "drive_create_doc",
         "description": "Создаёт новый Google Doc с текстом.",
         "input_schema": {
@@ -588,6 +612,34 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 mt = f.get("modifiedTime", "")[:10]
                 lines.append(f"ID: {f['id']}\n{f['name']} ({mt})")
             return "\n\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_create_folder":
+        try:
+            service = get_drive_service()
+            meta = {"name": tool_input["name"], "mimeType": "application/vnd.google-apps.folder"}
+            if tool_input.get("parent_id"):
+                meta["parents"] = [tool_input["parent_id"]]
+            f = service.files().create(body=meta, fields="id, name").execute()
+            return f"Папка создана: {f['name']} (ID: {f['id']})"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_move_file":
+        try:
+            service = get_drive_service()
+            file_id = tool_input["file_id"]
+            folder_id = tool_input["folder_id"]
+            f = service.files().get(fileId=file_id, fields="parents").execute()
+            prev_parents = ",".join(f.get("parents", []))
+            service.files().update(
+                fileId=file_id,
+                addParents=folder_id,
+                removeParents=prev_parents,
+                fields="id, name"
+            ).execute()
+            return "Файл перемещён."
         except Exception as e:
             return f"Ошибка: {e}"
 
