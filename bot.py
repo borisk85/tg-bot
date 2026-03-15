@@ -1263,23 +1263,27 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 
 async def send_voice_reminder(bot, user_id: int, text: str):
     """Отправляет голосовое напоминание через ElevenLabs, fallback на текст."""
+    import io
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
         await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
         return
     try:
-        import io
-        from elevenlabs.client import ElevenLabs
-        from elevenlabs import VoiceSettings
-        client = ElevenLabs(api_key=api_key)
-        audio = client.text_to_speech.convert(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel — женский голос
-            text=f"Напоминание: {text}",
-            model_id="eleven_multilingual_v2",
-            voice_settings=VoiceSettings(stability=0.5, similarity_boost=0.75)
+        voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel
+        resp = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+            json={
+                "text": f"Напоминание: {text}",
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+            }
         )
-        audio_bytes = b"".join(audio)
-        await bot.send_voice(chat_id=user_id, voice=io.BytesIO(audio_bytes))
+        if resp.status_code == 200:
+            await bot.send_voice(chat_id=user_id, voice=io.BytesIO(resp.content))
+        else:
+            logger.error(f"ElevenLabs ошибка {resp.status_code}: {resp.text}")
+            await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
     except Exception as e:
         logger.error(f"ElevenLabs ошибка: {e}")
         await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
