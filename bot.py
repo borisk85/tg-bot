@@ -139,6 +139,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Когда показываешь события — форматируй красиво, с датой и временем.
 
 Правило: если результат инструмента начинается с TRANSCRIPT: — это транскрипт YouTube видео. Сделай краткое резюме на русском: о чём видео, ключевые мысли, выводы. Без лишней воды.
+Правило: если результат инструмента начинается с NO_TRANSCRIPT: — субтитры недоступны. Сразу используй web_search чтобы найти информацию об этом видео по его URL или названию. Потом сделай резюме по найденному.
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
@@ -881,16 +882,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 text = " ".join(t["text"] for t in transcript)[:8000]
                 return f"TRANSCRIPT:{text}"
 
-            # Fallback: поиск через Brave
-            search_query = f"site:youtube.com {video_id} OR \"{url}\" summary key points"
-            headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": os.getenv("BRAVE_API_KEY")}
-            resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params={"q": f"youtube {video_id} review summary", "count": 5})
-            data = resp.json()
-            results = data.get("web", {}).get("results", [])
-            if results:
-                snippets = "\n".join(f"{r['title']}: {r.get('description','')}" for r in results[:3])
-                return f"TRANSCRIPT:Субтитры недоступны. Результаты поиска по видео:\n{snippets}"
-            return "Субтитры для этого видео недоступны, и поиск не дал результатов."
+            return f"NO_TRANSCRIPT:{url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
