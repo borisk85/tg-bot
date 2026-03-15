@@ -246,6 +246,22 @@ TOOLS = [
         }
     },
     {
+        "name": "get_crypto_prices",
+        "description": "Получает текущие курсы криптовалют (BTC, SOL, ETH и любых других) и курс тенге к доллару.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "coins": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Список монет: bitcoin, solana, ethereum, или любой CoinGecko ID. По умолчанию: bitcoin, solana, tether"
+                },
+                "include_kzt": {"type": "boolean", "description": "Добавить курс KZT/USD (по умолчанию true)"}
+            },
+            "required": []
+        }
+    },
+    {
         "name": "get_weather",
         "description": "Получает текущую погоду и прогноз на несколько дней для любого города.",
         "input_schema": {
@@ -441,6 +457,46 @@ def execute_tool(name: str, tool_input: dict) -> str:
             ids = [m["id"] for m in messages]
             service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
             return f"Спам очищен: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "get_crypto_prices":
+        try:
+            coins = tool_input.get("coins", ["bitcoin", "solana", "ethereum"])
+            include_kzt = tool_input.get("include_kzt", True)
+
+            ids = ",".join(coins)
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+                headers={"Accept": "application/json"}
+            )
+            data = resp.json()
+
+            names = {"bitcoin": "BTC", "solana": "SOL", "ethereum": "ETH", "tether": "USDT"}
+            lines = []
+            for coin in coins:
+                if coin in data:
+                    price = data[coin]["usd"]
+                    change = data[coin].get("usd_24h_change", 0)
+                    arrow = "📈" if change >= 0 else "📉"
+                    symbol = names.get(coin, coin.upper())
+                    lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
+                else:
+                    lines.append(f"❓ {coin}: не найдено")
+
+            if include_kzt:
+                resp2 = requests.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": "tether", "vs_currencies": "kzt"},
+                    headers={"Accept": "application/json"}
+                )
+                kzt_data = resp2.json()
+                kzt = kzt_data.get("tether", {}).get("kzt", 0)
+                if kzt:
+                    lines.append(f"💵 USD/KZT: {kzt:,.0f} ₸")
+
+            return "\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"
 
