@@ -1284,11 +1284,12 @@ async def send_voice_reminder(bot, user_id: int, text: str):
             audio.name = "reminder.mp3"
             await bot.send_audio(chat_id=user_id, audio=audio, title=f"Напоминание: {text}", performer="Бот")
         else:
-            logger.error(f"ElevenLabs ошибка {resp.status_code}: {resp.text}")
-            await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+            err = f"ElevenLabs {resp.status_code}: {resp.text[:200]}"
+            logger.error(err)
+            await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: {err}]")
     except Exception as e:
         logger.error(f"ElevenLabs ошибка: {e}")
-        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: {e}]")
 
 async def check_reminders(context):
     if not redis_client:
