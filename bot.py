@@ -1394,6 +1394,21 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Доступные команды:\n"
+        "/clear — очистить историю диалога\n"
+        "/myid — узнать свой Telegram ID\n\n"
+        "Что умею:\n"
+        "- Google Calendar, Gmail, Tasks, Drive\n"
+        "- Погода, курсы валют и крипты\n"
+        "- Инфо по токенам (адрес контракта)\n"
+        "- Напоминания\n"
+        "- Веб-поиск\n"
+        "- Калории\n"
+        "- Утренний дайджест в 11:00"
+    )
+
 async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context):
     try:
         from googleapiclient.http import MediaInMemoryUpload
@@ -1491,6 +1506,7 @@ def main():
     import datetime as dt
     app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
