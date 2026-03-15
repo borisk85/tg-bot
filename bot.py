@@ -877,7 +877,19 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             except:
                 pass
 
-            return f"NO_TRANSCRIPT:{url} | title: {title}" if title else f"NO_TRANSCRIPT:{url}"
+            # Ищем через Brave по названию видео
+            search_q = f'"{title}" youtube' if title else f"youtube.com/watch?v={video_id}"
+            try:
+                headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": os.getenv("BRAVE_API_KEY")}
+                resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params={"q": search_q, "count": 5}, timeout=8)
+                results = resp.json().get("web", {}).get("results", [])
+                if results:
+                    snippets = "\n\n".join(f"{r['title']}\n{r.get('description','')}" for r in results[:4])
+                    return f"TRANSCRIPT:Субтитры недоступны. Найдено через поиск по названию '{title}':\n\n{snippets}"
+            except:
+                pass
+
+            return f"Субтитры недоступны для этого видео. Название: {title or 'неизвестно'}. URL: {url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
