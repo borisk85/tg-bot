@@ -9,6 +9,7 @@ SCOPES = [
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/contacts.readonly",
 ]
 
 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)

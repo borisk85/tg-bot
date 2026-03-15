@@ -114,6 +114,7 @@ def get_google_creds():
             "https://mail.google.com/",
             "https://www.googleapis.com/auth/tasks",
             "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/contacts.readonly",
         ]
     )
 
@@ -294,15 +295,14 @@ TOOLS = [
         }
     },
     {
-        "name": "generate_image",
-        "description": "Генерирует изображение по текстовому описанию через FLUX. Используй когда просят нарисовать, сгенерировать, создать картинку или изображение.",
+        "name": "contacts_search",
+        "description": "Ищет контакты в Google Contacts по имени, фамилии или email. Используй когда нужно найти чей-то email, телефон или данные контакта.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Описание изображения на английском (переведи если нужно)"},
-                "size": {"type": "string", "description": "Размер: square (1:1), landscape (16:9), portrait (9:16). По умолчанию square."}
+                "query": {"type": "string", "description": "Имя, фамилия или email для поиска"}
             },
-            "required": ["prompt"]
+            "required": ["query"]
         }
     },
     {
@@ -674,27 +674,33 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
-    if name == "generate_image":
+    if name == "contacts_search":
         try:
-            import fal_client
-            os.environ["FAL_KEY"] = os.getenv("FAL_API_KEY", "")
-            prompt = tool_input["prompt"]
-            size = tool_input.get("size", "square")
-            size_map = {
-                "square": "square_hd",
-                "landscape": "landscape_16_9",
-                "portrait": "portrait_9_16"
-            }
-            result = fal_client.run(
-                "fal-ai/flux/schnell",
-                arguments={"prompt": prompt, "image_size": size_map.get(size, "square_hd"), "num_images": 1}
-            )
-            images = result.get("images", [])
-            if not images:
-                return "Не удалось сгенерировать изображение."
-            return f"IMAGE_URL:{images[0]['url']}"
+            service = build("people", "v1", credentials=get_google_creds())
+            results = service.people().searchContacts(
+                query=tool_input["query"],
+                readMask="names,emailAddresses,phoneNumbers",
+                pageSize=10
+            ).execute()
+            contacts = results.get("results", [])
+            if not contacts:
+                return "Контакты не найдены."
+            lines = []
+            for c in contacts:
+                p = c.get("person", {})
+                names = p.get("names", [{}])
+                name_ = names[0].get("displayName", "?") if names else "?"
+                emails = [e["value"] for e in p.get("emailAddresses", [])]
+                phones = [ph["value"] for ph in p.get("phoneNumbers", [])]
+                parts = [name_]
+                if emails:
+                    parts.append("Email: " + ", ".join(emails))
+                if phones:
+                    parts.append("Тел: " + ", ".join(phones))
+                lines.append(" | ".join(parts))
+            return "\n".join(lines)
         except Exception as e:
-            return f"Ошибка генерации: {e}"
+            return f"Ошибка: {e}"
 
     if name == "drive_create_sheet":
         try:
