@@ -1273,7 +1273,7 @@ async def send_voice_reminder(bot, user_id: int, text: str):
         from elevenlabs import VoiceSettings
         client = ElevenLabs(api_key=api_key)
         audio = client.text_to_speech.convert(
-            voice_id="pNInz6obpgDQGcFmaJgB",  # Adam — чёткий мужской голос
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel — женский голос
             text=f"Напоминание: {text}",
             model_id="eleven_multilingual_v2",
             voice_settings=VoiceSettings(stability=0.5, similarity_boost=0.75)
