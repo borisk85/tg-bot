@@ -292,6 +292,30 @@ TOOLS = [
         }
     },
     {
+        "name": "drive_create_sheet",
+        "description": "Создаёт новую таблицу Google Sheets в Drive.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название таблицы"},
+                "folder_id": {"type": "string", "description": "ID папки (необязательно)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "drive_create_slides",
+        "description": "Создаёт новую презентацию Google Slides в Drive.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название презентации"},
+                "folder_id": {"type": "string", "description": "ID папки (необязательно)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
         "name": "drive_create_folder",
         "description": "Создаёт папку в Google Drive.",
         "input_schema": {
@@ -612,6 +636,28 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 mt = f.get("modifiedTime", "")[:10]
                 lines.append(f"ID: {f['id']}\n{f['name']} ({mt})")
             return "\n\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_create_sheet":
+        try:
+            service = get_drive_service()
+            meta = {"name": tool_input["title"], "mimeType": "application/vnd.google-apps.spreadsheet"}
+            if tool_input.get("folder_id"):
+                meta["parents"] = [tool_input["folder_id"]]
+            f = service.files().create(body=meta, fields="id, name").execute()
+            return f"Таблица создана: {f['name']} (ID: {f['id']})"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_create_slides":
+        try:
+            service = get_drive_service()
+            meta = {"name": tool_input["title"], "mimeType": "application/vnd.google-apps.presentation"}
+            if tool_input.get("folder_id"):
+                meta["parents"] = [tool_input["folder_id"]]
+            f = service.files().create(body=meta, fields="id, name").execute()
+            return f"Презентация создана: {f['name']} (ID: {f['id']})"
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -1181,22 +1227,44 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text("История очищена.")
 
+async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context):
+    try:
+        from googleapiclient.http import MediaInMemoryUpload
+        service = get_drive_service()
+        media = MediaInMemoryUpload(file_bytes, mimetype=mime)
+        f = service.files().create(body={"name": filename}, media_body=media, fields="id, name").execute()
+        await update.message.reply_text(f"Файл '{f['name']}' загружен в Google Drive.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка загрузки в Drive: {e}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
     image_data = None
 
+    # Загрузка файла в Drive если caption содержит "в drive" / "в драйв"
+    caption_lower = (update.message.caption or "").lower()
+    upload_to_drive = any(w in caption_lower for w in ["в drive", "в драйв", "сохрани в drive", "загрузи в drive"])
+
     if update.message.photo:
         import base64
         photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
-        file_bytes = await file.download_as_bytearray()
+        tg_file = await context.bot.get_file(photo.file_id)
+        file_bytes = await tg_file.download_as_bytearray()
+        if upload_to_drive:
+            await _upload_to_drive(bytes(file_bytes), "photo.jpg", "image/jpeg", update, context)
+            return
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
-    elif update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/"):
+    elif update.message.document:
+        tg_file = await context.bot.get_file(update.message.document.file_id)
+        file_bytes = await tg_file.download_as_bytearray()
+        mime = update.message.document.mime_type or "application/octet-stream"
+        fname = update.message.document.file_name or "file"
+        if upload_to_drive or not mime.startswith("image/"):
+            await _upload_to_drive(bytes(file_bytes), fname, mime, update, context)
+            return
         import base64
-        file = await context.bot.get_file(update.message.document.file_id)
-        file_bytes = await file.download_as_bytearray()
-        image_data = {"media_type": update.message.document.mime_type, "data": base64.b64encode(file_bytes).decode()}
+        image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
@@ -1219,7 +1287,7 @@ def main():
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
-    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.IMAGE) & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     logger.info("Бот запущен!")
     try:
