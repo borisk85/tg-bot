@@ -1274,9 +1274,9 @@ async def send_morning_digest(context):
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
         date_str = f"{now.day} {months[now.month-1]}, {days[now.weekday()]}"
-        lines = [f"Привет! {date_str}", ""]
+        lines = [f"Сегодня {date_str}", ""]
 
-        # Погода
+        # Погода — текущая + прогноз на день
         try:
             api_key = os.getenv("OPENWEATHER_API_KEY")
             resp = requests.get("https://api.openweathermap.org/data/2.5/weather",
@@ -1285,7 +1285,20 @@ async def send_morning_digest(context):
             desc = w["weather"][0]["description"].capitalize()
             temp = w["main"]["temp"]
             feels = w["main"]["feels_like"]
-            lines.append(f"Погода: {desc}, {temp:.0f}C (ощущается {feels:.0f}C)")
+            wind = w["wind"]["speed"]
+            lines.append(f"Погода: {desc}, {temp:.0f}C (ощущается {feels:.0f}C), ветер {wind:.0f} м/с")
+
+            # Прогноз на день — мин/макс и осадки
+            resp2 = requests.get("https://api.openweathermap.org/data/2.5/forecast",
+                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8})
+            forecast = resp2.json()
+            temps = [i["main"]["temp"] for i in forecast["list"]]
+            descriptions = [i["weather"][0]["description"] for i in forecast["list"]]
+            t_min, t_max = min(temps), max(temps)
+            rain = any("дождь" in d or "rain" in d or "ливень" in d for d in descriptions)
+            snow = any("снег" in d or "snow" in d for d in descriptions)
+            precip = "Ожидается дождь, зонт пригодится." if rain else ("Ожидается снег." if snow else "Осадков не ожидается.")
+            lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}C. {precip}")
             lines.append("")
         except:
             pass
@@ -1315,16 +1328,18 @@ async def send_morning_digest(context):
         except:
             pass
 
-        # Задачи (невыполненные)
+        # Задачи (только список "Задачи", невыполненные)
         try:
             service = get_tasks_service()
             lists = service.tasklists().list().execute().get("items", [])
             task_lines = []
             for tl in lists:
-                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
-                for t in tasks:
-                    if t.get("status") != "completed":
-                        task_lines.append(f"• [{tl['title']}] {t['title']}")
+                if "задач" in tl["title"].lower() or tl == lists[0]:
+                    tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                    for t in tasks:
+                        if t.get("status") != "completed":
+                            task_lines.append(f"• {t['title']}")
+                    break
             if task_lines:
                 lines.append("Задачи:")
                 lines.extend(task_lines[:10])
