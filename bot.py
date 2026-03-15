@@ -302,7 +302,7 @@ TOOLS = [
             "properties": {
                 "prompt": {"type": "string", "description": "Что сделать с изображением (на английском)"},
                 "image_url": {"type": "string", "description": "URL исходного изображения"},
-                "strength": {"type": "number", "description": "Сила изменения: 0.3-0.5 — мягкий стиль, сохраняет структуру; 0.6-0.85 — сильное изменение; по умолчанию 0.75"}
+                "strength": {"type": "number", "description": "Сила изменения: 0.5-0.7 — сохраняет структуру; 0.85-0.95 — сильное изменение стиля; по умолчанию 0.92"}
             },
             "required": ["prompt", "image_url"]
         }
@@ -687,9 +687,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 arguments={
                     "prompt": tool_input["prompt"],
                     "image_url": tool_input["image_url"],
-                    "strength": tool_input.get("strength", 0.75),
+                    "strength": tool_input.get("strength", 0.92),
                     "num_inference_steps": 28,
-                    "guidance_scale": 3.5,
                     "num_images": 1
                 }
             )
