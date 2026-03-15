@@ -246,6 +246,18 @@ TOOLS = [
         }
     },
     {
+        "name": "get_weather",
+        "description": "Получает текущую погоду и прогноз на несколько дней для любого города.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "Название города (например: Алматы, Москва, London)"},
+                "forecast_days": {"type": "integer", "description": "Прогноз на N дней (0 = только сейчас, максимум 5)"}
+            },
+            "required": ["city"]
+        }
+    },
+    {
         "name": "tasks_list",
         "description": "Показывает задачи из Google Tasks. Используй когда пользователь просит показать задачи, список дел, заметки.",
         "input_schema": {
@@ -429,6 +441,52 @@ def execute_tool(name: str, tool_input: dict) -> str:
             ids = [m["id"] for m in messages]
             service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
             return f"Спам очищен: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "get_weather":
+        try:
+            city = tool_input["city"]
+            api_key = os.getenv("OPENWEATHER_API_KEY")
+            forecast_days = tool_input.get("forecast_days", 0)
+
+            # Текущая погода
+            resp = requests.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": city, "appid": api_key, "units": "metric", "lang": "ru"}
+            )
+            data = resp.json()
+            if resp.status_code != 200:
+                return f"Город не найден: {city}"
+
+            desc = data["weather"][0]["description"].capitalize()
+            temp = data["main"]["temp"]
+            feels = data["main"]["feels_like"]
+            humidity = data["main"]["humidity"]
+            wind = data["wind"]["speed"]
+            result = f"🌤 {city}\n{desc}, {temp:.0f}°C (ощущается {feels:.0f}°C)\nВлажность: {humidity}%, Ветер: {wind} м/с"
+
+            if forecast_days and forecast_days > 0:
+                resp2 = requests.get(
+                    "https://api.openweathermap.org/data/2.5/forecast",
+                    params={"q": city, "appid": api_key, "units": "metric", "lang": "ru", "cnt": forecast_days * 8}
+                )
+                forecast = resp2.json()
+                seen_dates = set()
+                forecast_lines = []
+                for item in forecast.get("list", []):
+                    date = item["dt_txt"][:10]
+                    if date not in seen_dates and date != datetime.now().strftime("%Y-%m-%d"):
+                        seen_dates.add(date)
+                        t = item["main"]["temp"]
+                        d = item["weather"][0]["description"]
+                        forecast_lines.append(f"• {date}: {t:.0f}°C, {d}")
+                    if len(seen_dates) >= forecast_days:
+                        break
+                if forecast_lines:
+                    result += "\n\nПрогноз:\n" + "\n".join(forecast_lines)
+
+            return result
         except Exception as e:
             return f"Ошибка: {e}"
 
