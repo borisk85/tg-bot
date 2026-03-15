@@ -302,7 +302,7 @@ TOOLS = [
             "properties": {
                 "prompt": {"type": "string", "description": "Что сделать с изображением (на английском)"},
                 "image_url": {"type": "string", "description": "URL исходного изображения"},
-                "strength": {"type": "number", "description": "Сила изменения: 0.2-0.4 — сохраняет людей/лица, меняет стиль; 0.6-0.8 — сильное изменение; по умолчанию 0.4"}
+                "strength": {"type": "number", "description": "Сила изменения: 0.3-0.5 — мягкий стиль, сохраняет структуру; 0.6-0.85 — сильное изменение; по умолчанию 0.75"}
             },
             "required": ["prompt", "image_url"]
         }
@@ -687,7 +687,9 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 arguments={
                     "prompt": tool_input["prompt"],
                     "image_url": tool_input["image_url"],
-                    "strength": tool_input.get("strength", 0.4),
+                    "strength": tool_input.get("strength", 0.75),
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
                     "num_images": 1
                 }
             )
@@ -865,17 +867,31 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             video_id = match.group(1)
 
             from youtube_transcript_api import YouTubeTranscriptApi
-            # Пробуем русский, потом английский
-            try:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["ru"])
-            except:
+            transcript = None
+            for langs in [["ru"], ["en"], None]:
                 try:
-                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+                    if langs:
+                        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=langs)
+                    else:
+                        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                    break
                 except:
-                    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                    continue
 
-            text = " ".join(t["text"] for t in transcript)[:8000]
-            return f"TRANSCRIPT:{text}"
+            if transcript:
+                text = " ".join(t["text"] for t in transcript)[:8000]
+                return f"TRANSCRIPT:{text}"
+
+            # Fallback: поиск через Brave
+            search_query = f"site:youtube.com {video_id} OR \"{url}\" summary key points"
+            headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": os.getenv("BRAVE_API_KEY")}
+            resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params={"q": f"youtube {video_id} review summary", "count": 5})
+            data = resp.json()
+            results = data.get("web", {}).get("results", [])
+            if results:
+                snippets = "\n".join(f"{r['title']}: {r.get('description','')}" for r in results[:3])
+                return f"TRANSCRIPT:Субтитры недоступны. Результаты поиска по видео:\n{snippets}"
+            return "Субтитры для этого видео недоступны, и поиск не дал результатов."
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
