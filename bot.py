@@ -1266,7 +1266,7 @@ async def send_voice_reminder(bot, user_id: int, text: str):
     import io
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
-        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}\n[DEBUG: ELEVENLABS_API_KEY не найден]")
         return
     try:
         voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel
