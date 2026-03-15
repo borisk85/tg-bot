@@ -1262,19 +1262,10 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def send_voice_reminder(bot, user_id: int, text: str):
-    """Отправляет голосовое напоминание через gTTS, fallback на текст."""
-    import io
-    try:
-        from gtts import gTTS
-        tts = gTTS(text=f"Напоминание: {text}", lang="ru")
-        audio = io.BytesIO()
-        tts.write_to_fp(audio)
-        audio.seek(0)
-        audio.name = "reminder.mp3"
-        await bot.send_audio(chat_id=user_id, audio=audio, title=f"Напоминание: {text}", performer="Бот")
-    except Exception as e:
-        logger.error(f"gTTS ошибка: {e}")
-        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+    """Отправляет текстовое напоминание."""
+    import re
+    clean_text = re.sub(r'[^\w\s\.,!?:;\-\(\)«»"\']+', '', text).strip()
+    await bot.send_message(chat_id=user_id, text=f"Напоминание: {clean_text}")
 
 async def check_reminders(context):
     if not redis_client:
