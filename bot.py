@@ -1267,6 +1267,74 @@ async def send_voice_reminder(bot, user_id: int, text: str):
     clean_text = re.sub(r'[^\w\s\.,!?:;\-\(\)«»"\']+', '', text).strip()
     await bot.send_message(chat_id=user_id, text=f"Напоминание: {clean_text}")
 
+async def send_morning_digest(context):
+    user_id = 661638470
+    try:
+        now = now_local()
+        days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
+        date_str = f"{now.day} {months[now.month-1]}, {days[now.weekday()]}"
+        lines = [f"Привет! {date_str}", ""]
+
+        # Погода
+        try:
+            api_key = os.getenv("OPENWEATHER_API_KEY")
+            resp = requests.get("https://api.openweathermap.org/data/2.5/weather",
+                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru"})
+            w = resp.json()
+            desc = w["weather"][0]["description"].capitalize()
+            temp = w["main"]["temp"]
+            feels = w["main"]["feels_like"]
+            lines.append(f"Погода: {desc}, {temp:.0f}C (ощущается {feels:.0f}C)")
+            lines.append("")
+        except:
+            pass
+
+        # События на сегодня
+        try:
+            service = get_calendar_service()
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+            result = service.events().list(
+                calendarId="primary",
+                timeMin=start.isoformat(),
+                timeMax=end.isoformat(),
+                maxResults=10, singleEvents=True, orderBy="startTime"
+            ).execute()
+            events = result.get("items", [])
+            if events:
+                lines.append("События сегодня:")
+                for e in events:
+                    start_t = e["start"].get("dateTime", e["start"].get("date", ""))
+                    if "T" in start_t:
+                        t = datetime.fromisoformat(start_t).strftime("%H:%M")
+                        lines.append(f"• {t} — {e['summary']}")
+                    else:
+                        lines.append(f"• {e['summary']}")
+                lines.append("")
+        except:
+            pass
+
+        # Задачи (невыполненные)
+        try:
+            service = get_tasks_service()
+            lists = service.tasklists().list().execute().get("items", [])
+            task_lines = []
+            for tl in lists:
+                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                for t in tasks:
+                    if t.get("status") != "completed":
+                        task_lines.append(f"• [{tl['title']}] {t['title']}")
+            if task_lines:
+                lines.append("Задачи:")
+                lines.extend(task_lines[:10])
+        except:
+            pass
+
+        await context.bot.send_message(chat_id=user_id, text="\n".join(lines))
+    except Exception as e:
+        logger.error(f"Дайджест ошибка: {e}")
+
 async def check_reminders(context):
     if not redis_client:
         return
@@ -1401,6 +1469,8 @@ def main():
 
     app = Application.builder().token(token).build()
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
+    import datetime as dt
+    app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
