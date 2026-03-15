@@ -292,6 +292,18 @@ TOOLS = [
         }
     },
     {
+        "name": "generate_image",
+        "description": "Генерирует изображение по текстовому описанию через FLUX. Используй когда просят нарисовать, сгенерировать, создать картинку или изображение.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Описание изображения на английском (переведи если нужно)"},
+                "size": {"type": "string", "description": "Размер: square (1:1), landscape (16:9), portrait (9:16). По умолчанию square."}
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
         "name": "drive_create_sheet",
         "description": "Создаёт новую таблицу Google Sheets в Drive.",
         "input_schema": {
@@ -638,6 +650,28 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return "\n\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"
+
+    if name == "generate_image":
+        try:
+            import fal_client
+            os.environ["FAL_KEY"] = os.getenv("FAL_API_KEY", "")
+            prompt = tool_input["prompt"]
+            size = tool_input.get("size", "square")
+            size_map = {
+                "square": "square_hd",
+                "landscape": "landscape_16_9",
+                "portrait": "portrait_9_16"
+            }
+            result = fal_client.run(
+                "fal-ai/flux/schnell",
+                arguments={"prompt": prompt, "image_size": size_map.get(size, "square_hd"), "num_images": 1}
+            )
+            images = result.get("images", [])
+            if not images:
+                return "Не удалось сгенерировать изображение."
+            return f"IMAGE_URL:{images[0]['url']}"
+        except Exception as e:
+            return f"Ошибка генерации: {e}"
 
     if name == "drive_create_sheet":
         try:
@@ -1128,7 +1162,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
-async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> str:
+async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_photo=None) -> str:
     history = get_history(user_id)
     if image_data:
         user_content = [
@@ -1174,6 +1208,10 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> st
             for block in assistant_content:
                 if block.type == "tool_use":
                     result = execute_tool(block.name, block.input, user_id)
+                    if result.startswith("IMAGE_URL:") and send_photo:
+                        url = result[len("IMAGE_URL:"):]
+                        await send_photo(url)
+                        result = "Изображение сгенерировано и отправлено."
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -1292,8 +1330,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
+    async def send_photo(url: str):
+        await update.message.reply_photo(photo=url)
+
     try:
-        reply = await run_agent(user_id, user_text, image_data)
+        reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
         for i in range(0, len(reply), 4096):
             await update.message.reply_text(reply[i:i + 4096])
     except Exception as e:
