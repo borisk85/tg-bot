@@ -6,8 +6,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.send",
+    "https://mail.google.com/",  # полный доступ к Gmail (включая удаление)
 ]
 
 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)

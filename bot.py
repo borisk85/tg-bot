@@ -96,8 +96,7 @@ def get_google_creds():
         token_uri="https://oauth2.googleapis.com/token",
         scopes=[
             "https://www.googleapis.com/auth/calendar",
-            "https://www.googleapis.com/auth/gmail.modify",
-            "https://www.googleapis.com/auth/gmail.send",
+            "https://mail.google.com/",
         ]
     )
 
@@ -113,7 +112,10 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Отвечаешь на русском языке. Используй доступные инструменты когда нужно.
 Текущая дата и время: {datetime}
 При создании событий используй временную зону Asia/Almaty (UTC+5) если не указано другое.
-Когда показываешь события — форматируй красиво, с датой и временем."""
+Когда показываешь события — форматируй красиво, с датой и временем.
+
+Контакты пользователя:
+- Жена: Дана, dana.aristanbayeva@gmail.com"""
 
 # ── Tool definitions ──────────────────────────────────────────────────────────
 
