@@ -191,6 +191,39 @@ TOOLS = [
         }
     },
     {
+        "name": "gmail_trash",
+        "description": "Перемещает письмо в корзину по ID. Используй когда пользователь хочет удалить письмо.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "ID письма из результатов gmail_search"}
+            },
+            "required": ["message_id"]
+        }
+    },
+    {
+        "name": "gmail_trash_many",
+        "description": "Перемещает несколько писем в корзину по результатам поиска. Используй когда нужно массово удалить письма по запросу.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Gmail поисковый запрос — все найденные письма уйдут в корзину"},
+                "max_results": {"type": "integer", "description": "Максимум писем для удаления (по умолчанию 50)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "gmail_empty_trash",
+        "description": "Полностью очищает корзину Gmail (безвозвратное удаление).",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "gmail_empty_spam",
+        "description": "Полностью очищает папку Спам в Gmail (безвозвратное удаление).",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
         "name": "web_search",
         "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
         "input_schema": {
@@ -284,6 +317,58 @@ def execute_tool(name: str, tool_input: dict) -> str:
                 body["threadId"] = thread.get("threadId")
             service.users().messages().send(userId="me", body=body).execute()
             return f"Письмо отправлено на {tool_input['to']}."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_trash":
+        try:
+            service = get_gmail_service()
+            service.users().messages().trash(userId="me", id=tool_input["message_id"]).execute()
+            return "Письмо перемещено в корзину."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_trash_many":
+        try:
+            service = get_gmail_service()
+            query = tool_input["query"]
+            max_results = tool_input.get("max_results", 50)
+            result = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+            messages = result.get("messages", [])
+            if not messages:
+                return "Писем по запросу не найдено."
+            for msg in messages:
+                service.users().messages().trash(userId="me", id=msg["id"]).execute()
+            return f"Перемещено в корзину: {len(messages)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_empty_trash":
+        try:
+            service = get_gmail_service()
+            service.users().messages().batchDelete(userId="me", body={"ids": []})
+            # Используем правильный метод — emptyTrash если доступен, иначе через список
+            # Gmail API не имеет emptyTrash, удаляем через поиск in:trash
+            result = service.users().messages().list(userId="me", q="in:trash", maxResults=500).execute()
+            messages = result.get("messages", [])
+            if not messages:
+                return "Корзина уже пуста."
+            ids = [m["id"] for m in messages]
+            service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
+            return f"Корзина очищена: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_empty_spam":
+        try:
+            service = get_gmail_service()
+            result = service.users().messages().list(userId="me", q="in:spam", maxResults=500).execute()
+            messages = result.get("messages", [])
+            if not messages:
+                return "Спам уже пуст."
+            ids = [m["id"] for m in messages]
+            service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
+            return f"Спам очищен: удалено {len(ids)} писем."
         except Exception as e:
             return f"Ошибка: {e}"
 
