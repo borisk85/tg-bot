@@ -1,7 +1,12 @@
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import zoneinfo
+TZ = zoneinfo.ZoneInfo("Asia/Almaty")
+
+def now_local():
+    return datetime.now(TZ)
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from telegram import Update
@@ -124,7 +129,7 @@ def get_tasks_service():
 
 SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, краткий, полезный.
 Отвечаешь на русском языке. Используй доступные инструменты когда нужно.
-Никогда не используй markdown-форматирование: никаких **, __, *, _, `, #. Пиши plain text.
+ВАЖНО: никогда не используй markdown: запрещены **, __, *, _, `, #, ~. Только plain text без какого-либо форматирования.
 Текущая дата и время: {datetime}
 При создании событий используй временную зону Asia/Almaty (UTC+5) если не указано другое.
 Когда показываешь события — форматируй красиво, с датой и временем.
@@ -399,7 +404,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     logger.info(f"Tool: {name}({json.dumps(tool_input, ensure_ascii=False)})")
 
     if name == "get_current_datetime":
-        now = datetime.now()
+        now = now_local()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         return f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')}"
 
@@ -522,7 +527,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             import re
             text = tool_input["text"]
             dt_str = tool_input["datetime"]
-            now = datetime.now()
+            now = now_local()
 
             if dt_str.startswith("+"):
                 match = re.match(r'\+(\d+)([mhd])', dt_str)
@@ -534,7 +539,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 else:
                     return "Неверный формат времени. Используй +30m, +2h, +1d или YYYY-MM-DDTHH:MM"
             else:
-                remind_at = datetime.fromisoformat(dt_str)
+                remind_at = datetime.fromisoformat(dt_str).replace(tzinfo=TZ)
 
             reminders = get_reminders(user_id)
             reminders.append({"text": text, "at": remind_at.isoformat(), "done": False})
@@ -702,7 +707,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 forecast_lines = []
                 for item in forecast.get("list", []):
                     date = item["dt_txt"][:10]
-                    if date not in seen_dates and date != datetime.now().strftime("%Y-%m-%d"):
+                    if date not in seen_dates and date != now_local().strftime("%Y-%m-%d"):
                         seen_dates.add(date)
                         t = item["main"]["temp"]
                         d = item["weather"][0]["description"]
@@ -940,7 +945,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> st
         history = history[-40:]
 
     messages = list(history)
-    now = datetime.now()
+    now = now_local()
     days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
     system = SYSTEM_PROMPT.format(
         datetime=f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')}"
@@ -989,14 +994,14 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> st
 async def check_reminders(context):
     if not redis_client:
         return
-    now = datetime.now()
+    now = now_local()
     # Сканируем все ключи напоминаний
     for key in redis_client.scan_iter("reminders:*"):
         user_id = int(key.split(":")[1])
         reminders = get_reminders(user_id)
         changed = False
         for r in reminders:
-            if not r.get("done") and datetime.fromisoformat(r["at"]) <= now:
+            if not r.get("done") and datetime.fromisoformat(r["at"]).replace(tzinfo=TZ) <= now:
                 r["done"] = True
                 changed = True
                 try:
