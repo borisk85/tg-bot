@@ -869,7 +869,15 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 text = " ".join(t["text"] for t in transcript)[:8000]
                 return f"TRANSCRIPT:{text}"
 
-            return f"NO_TRANSCRIPT:{url}"
+            # Получаем название через oEmbed
+            title = ""
+            try:
+                oembed = requests.get(f"https://www.youtube.com/oembed?url={url}&format=json", timeout=5)
+                title = oembed.json().get("title", "")
+            except:
+                pass
+
+            return f"NO_TRANSCRIPT:{url} | title: {title}" if title else f"NO_TRANSCRIPT:{url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
