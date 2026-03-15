@@ -57,6 +57,34 @@ def clear_history(user_id: int):
     else:
         conversations[user_id] = []
 
+def serialize_messages(messages: list) -> list:
+    """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
+    result = []
+    for msg in messages:
+        content = msg["content"]
+        if isinstance(content, list):
+            serialized_content = []
+            for block in content:
+                if hasattr(block, "model_dump"):
+                    serialized_content.append(block.model_dump())
+                elif hasattr(block, "type"):
+                    d = {"type": block.type}
+                    if hasattr(block, "text"):
+                        d["text"] = block.text
+                    if hasattr(block, "id"):
+                        d["id"] = block.id
+                    if hasattr(block, "name"):
+                        d["name"] = block.name
+                    if hasattr(block, "input"):
+                        d["input"] = block.input
+                    serialized_content.append(d)
+                else:
+                    serialized_content.append(block)
+            result.append({"role": msg["role"], "content": serialized_content})
+        else:
+            result.append(msg)
+    return result
+
 # ── Google Calendar client ────────────────────────────────────────────────────
 
 def get_google_creds():
@@ -408,7 +436,7 @@ async def run_agent(user_id: int, user_text: str) -> str:
                 block.text for block in assistant_content
                 if hasattr(block, "text")
             )
-            set_history(user_id, messages)
+            set_history(user_id, serialize_messages(messages))
             return text or "Готово."
 
         if response.stop_reason == "tool_use":
@@ -426,7 +454,7 @@ async def run_agent(user_id: int, user_text: str) -> str:
 
         break
 
-    set_history(user_id, messages)
+    set_history(user_id, serialize_messages(messages))
     return "Не удалось получить ответ."
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
