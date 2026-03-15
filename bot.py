@@ -261,16 +261,20 @@ TOOLS = [
     },
     {
         "name": "get_crypto_prices",
-        "description": "Получает текущие курсы криптовалют (BTC, SOL, ETH и любых других) и курс тенге к доллару. ВСЕГДА используй этот инструмент когда спрашивают курс тенге, доллара, биткоина, крипты — не используй web_search для этого.",
+        "description": "Получает курсы криптовалют к USD и курсы любых мировых валют друг к другу. ВСЕГДА используй этот инструмент когда спрашивают про курсы валют или крипты — не используй web_search для этого.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "coins": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Список монет: bitcoin, solana, ethereum, или любой CoinGecko ID. По умолчанию: bitcoin, solana, tether"
+                    "description": "Список криптовалют (CoinGecko ID): bitcoin, solana, ethereum и др. Оставь пустым если нужны только фиатные валюты."
                 },
-                "include_kzt": {"type": "boolean", "description": "Добавить курс KZT/USD (по умолчанию true)"}
+                "currencies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Пары фиатных валют в формате 'FROM/TO', например: 'USD/KZT', 'EUR/RUB', 'USD/EUR'. Можно несколько."
+                }
             },
             "required": []
         }
@@ -504,34 +508,70 @@ def execute_tool(name: str, tool_input: dict) -> str:
 
     if name == "get_crypto_prices":
         try:
-            coins = tool_input.get("coins", ["bitcoin", "solana", "ethereum"])
-            include_kzt = tool_input.get("include_kzt", True)
-
-            ids = ",".join(coins)
-            resp = requests.get(
-                "https://api.coingecko.com/api/v3/simple/price",
-                params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
-                headers={"Accept": "application/json"}
-            )
-            data = resp.json()
-
-            names = {"bitcoin": "BTC", "solana": "SOL", "ethereum": "ETH", "tether": "USDT"}
+            coins = tool_input.get("coins", [])
+            currencies = tool_input.get("currencies", [])
             lines = []
-            for coin in coins:
-                if coin in data:
+
+            # Крипта → USD
+            if coins:
+                ids = ",".join(coins)
+                resp = requests.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+                    headers={"Accept": "application/json"}
+                )
+                data = resp.json()
+                names = {"bitcoin": "BTC", "solana": "SOL", "ethereum": "ETH", "tether": "USDT"}
+                for coin in coins:
+                    if coin in data:
+                        price = data[coin]["usd"]
+                        change = data[coin].get("usd_24h_change", 0)
+                        arrow = "📈" if change >= 0 else "📉"
+                        symbol = names.get(coin, coin.upper())
+                        lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
+                    else:
+                        lines.append(f"❓ {coin}: не найдено")
+
+            # Фиатные пары: FROM/TO
+            if currencies:
+                # Собираем уникальные базовые валюты
+                bases = set()
+                pairs = []
+                for c in currencies:
+                    parts = c.upper().replace("-", "/").split("/")
+                    if len(parts) == 2:
+                        bases.add(parts[0])
+                        pairs.append((parts[0], parts[1]))
+
+                rates_cache = {}
+                for base in bases:
+                    r = requests.get(f"https://api.exchangerate-api.com/v4/latest/{base}")
+                    rates_cache[base] = r.json().get("rates", {})
+
+                for frm, to in pairs:
+                    rate = rates_cache.get(frm, {}).get(to)
+                    if rate:
+                        lines.append(f"💱 {frm}/{to}: {rate:,.4f}")
+                    else:
+                        lines.append(f"❓ {frm}/{to}: не найдено")
+
+            # Если ничего не запросили — показать дефолт
+            if not coins and not currencies:
+                resp = requests.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": "bitcoin,solana,ethereum", "vs_currencies": "usd", "include_24hr_change": "true"},
+                    headers={"Accept": "application/json"}
+                )
+                data = resp.json()
+                for coin, sym in [("bitcoin","BTC"),("solana","SOL"),("ethereum","ETH")]:
                     price = data[coin]["usd"]
                     change = data[coin].get("usd_24h_change", 0)
                     arrow = "📈" if change >= 0 else "📉"
-                    symbol = names.get(coin, coin.upper())
-                    lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
-                else:
-                    lines.append(f"❓ {coin}: не найдено")
-
-            if include_kzt:
-                resp2 = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
-                kzt = resp2.json().get("rates", {}).get("KZT", 0)
+                    lines.append(f"{arrow} {sym}: ${price:,.2f} ({change:+.1f}%)")
+                r = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
+                kzt = r.json().get("rates", {}).get("KZT", 0)
                 if kzt:
-                    lines.append(f"💵 USD/KZT: {kzt:,.0f} ₸")
+                    lines.append(f"💱 USD/KZT: {kzt:,.0f} ₸")
 
             return "\n".join(lines)
         except Exception as e:
