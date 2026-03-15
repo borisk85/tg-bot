@@ -682,8 +682,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             size = tool_input.get("size", "square")
             size_map = {"square": "square_hd", "landscape": "landscape_16_9", "portrait": "portrait_9_16"}
             result = fal_client.run(
-                "fal-ai/flux/schnell",
-                arguments={"prompt": prompt, "image_size": size_map.get(size, "square_hd"), "num_images": 1}
+                "fal-ai/flux/dev",
+                arguments={"prompt": prompt, "image_size": size_map.get(size, "square_hd"), "num_inference_steps": 28, "guidance_scale": 3.5, "num_images": 1}
             )
             images = result.get("images", [])
             if not images:
