@@ -2,8 +2,8 @@ import os
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-import zoneinfo
-TZ = zoneinfo.ZoneInfo("Asia/Almaty")
+import pytz
+TZ = pytz.timezone("Asia/Almaty")
 
 def now_local():
     return datetime.now(TZ)
@@ -805,7 +805,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 else:
                     return "Неверный формат времени. Используй +30m, +2h, +1d или YYYY-MM-DDTHH:MM"
             else:
-                remind_at = datetime.fromisoformat(dt_str).replace(tzinfo=TZ)
+                remind_at = TZ.localize(datetime.fromisoformat(dt_str))
 
             reminders = get_reminders(user_id)
             reminders.append({"text": text, "at": remind_at.isoformat(), "done": False})
@@ -1300,7 +1300,7 @@ async def check_reminders(context):
         reminders = get_reminders(user_id)
         changed = False
         for r in reminders:
-            if not r.get("done") and datetime.fromisoformat(r["at"]).replace(tzinfo=TZ) <= now:
+            if not r.get("done") and TZ.localize(datetime.fromisoformat(r["at"]).replace(tzinfo=None)) <= now:
                 r["done"] = True
                 changed = True
                 try:
