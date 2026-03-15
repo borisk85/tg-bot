@@ -138,6 +138,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 При создании событий используй временную зону Asia/Almaty (UTC+5) если не указано другое.
 Когда показываешь события — форматируй красиво, с датой и временем.
 
+Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. Промпт переводи на английский.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 
@@ -289,6 +290,19 @@ TOOLS = [
                 "file_id": {"type": "string", "description": "ID файла из drive_search"}
             },
             "required": ["file_id"]
+        }
+    },
+    {
+        "name": "edit_image",
+        "description": "Изменяет существующее фото по текстовому описанию через FLUX img2img. Используй когда пользователь прислал фото и просит его изменить, перерисовать, применить стиль.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Что сделать с изображением (на английском)"},
+                "image_url": {"type": "string", "description": "URL исходного изображения"},
+                "strength": {"type": "number", "description": "Сила изменения от 0.1 (минимум) до 1.0 (максимум), по умолчанию 0.85"}
+            },
+            "required": ["prompt", "image_url"]
         }
     },
     {
@@ -648,6 +662,26 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 mt = f.get("modifiedTime", "")[:10]
                 lines.append(f"ID: {f['id']}\n{f['name']} ({mt})")
             return "\n\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "edit_image":
+        try:
+            import fal_client
+            os.environ["FAL_KEY"] = os.getenv("FAL_API_KEY", "")
+            result = fal_client.run(
+                "fal-ai/flux/dev/image-to-image",
+                arguments={
+                    "prompt": tool_input["prompt"],
+                    "image_url": tool_input["image_url"],
+                    "strength": tool_input.get("strength", 0.85),
+                    "num_images": 1
+                }
+            )
+            images = result.get("images", [])
+            if not images:
+                return "Не удалось изменить изображение."
+            return f"IMAGE_URL:{images[0]['url']}"
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -1285,13 +1319,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     upload_to_drive = any(w in caption_lower for w in ["в drive", "в драйв", "сохрани в drive", "загрузи в drive"])
 
     if update.message.photo:
-        import base64
+        import base64, io
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
         file_bytes = await tg_file.download_as_bytearray()
         if upload_to_drive:
             await _upload_to_drive(bytes(file_bytes), "photo.jpg", "image/jpeg", update, context)
             return
+        # Если есть текст — возможно img2img, загружаем на fal storage
+        if user_text and any(w in user_text.lower() for w in ["измени", "перерисуй", "стиль", "сделай", "apply", "transform", "edit"]):
+            try:
+                import fal_client
+                os.environ["FAL_KEY"] = os.getenv("FAL_API_KEY", "")
+                uploaded = fal_client.upload(bytes(file_bytes), "image/jpeg")
+                user_text = f"{user_text} [image_url:{uploaded}]"
+            except Exception:
+                pass
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
     elif update.message.document:
         tg_file = await context.bot.get_file(update.message.document.file_id)
