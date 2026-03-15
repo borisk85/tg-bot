@@ -7,6 +7,7 @@ Telegram-бот на базе Claude API с agent loop и инструмента
 ```
 Telegram → bot.py → Claude API (tool_use) → инструменты → ответ
                          Railway (облако)
+                         Redis (память/история/напоминания)
 ```
 
 ## Файлы
@@ -24,6 +25,10 @@ ANTHROPIC_API_KEY       — ключ Anthropic API
 GOOGLE_CLIENT_ID        — Google OAuth2 client ID
 GOOGLE_CLIENT_SECRET    — Google OAuth2 client secret
 GOOGLE_REFRESH_TOKEN    — Google OAuth2 refresh token (получен через auth_google.py)
+REDIS_URL               — URL Redis (Railway Redis plugin)
+BRAVE_API_KEY           — Brave Search API
+OPENWEATHER_API_KEY     — OpenWeatherMap API
+FAL_API_KEY             — fal.ai (генерация изображений)
 ```
 
 ## Запуск локально
@@ -50,12 +55,30 @@ git push
 
 ## Текущие инструменты
 - `get_current_datetime` — текущая дата и время
-- `calendar_list_events` — список событий Google Calendar
-- `calendar_create_event` — создать событие
-- `calendar_delete_event` — удалить событие
+- `calendar_list_events` / `calendar_create_event` / `calendar_delete_event` — Google Calendar
+- `gmail_search` / `gmail_read` / `gmail_send` — Gmail
+- `gmail_trash` / `gmail_trash_many` / `gmail_empty_trash` / `gmail_empty_spam` — удаление писем
+- `tasks_list` / `tasks_create` / `tasks_complete` / `tasks_search` — Google Tasks (списки Задачи и Идеи)
+- `drive_search` / `drive_read` / `drive_create_doc` / `drive_create_sheet` / `drive_create_slides` / `drive_create_folder` / `drive_move_file` — Google Drive
+- `web_search` — Brave Search
+- `get_weather` — OpenWeatherMap (текущая + прогноз)
+- `get_crypto_prices` — CoinGecko + ExchangeRate (крипта и фиатные пары)
+- `get_token_info` — Dexscreener (по адресу контракта)
+- `reminder_set` / `reminder_list` / `reminder_cancel` — напоминания (Redis)
+- `generate_image` — fal.ai FLUX dev (текст → изображение)
+
+## Отключённые / ожидают замены
+- `edit_image` — img2img отключён, ждёт новой модели (nano banana 2)
+
+## Спецфункции
+- Утренний дайджест в 11:00 Almaty — погода + события + задачи (user_id=661638470)
+- Загрузка файла/фото в Drive — отправить с подписью "в drive"
+- Чтение PDF и Word документов
+- Калории — нативно через Claude (без API)
+- Анализ фото — нативно через Claude Vision
 
 ## Модель
 `claude-sonnet-4-6` — менять в `run_agent()` в bot.py
 
 ## Временная зона
-Asia/Almaty (UTC+5) — менять в SYSTEM_PROMPT и в `calendar_create_event`
+Asia/Almaty (UTC+5) — задана через pytz в `TZ = pytz.timezone("Asia/Almaty")`
