@@ -113,6 +113,7 @@ def get_google_creds():
             "https://www.googleapis.com/auth/calendar",
             "https://mail.google.com/",
             "https://www.googleapis.com/auth/tasks",
+            "https://www.googleapis.com/auth/drive",
         ]
     )
 
@@ -124,6 +125,9 @@ def get_gmail_service():
 
 def get_tasks_service():
     return build("tasks", "v1", credentials=get_google_creds())
+
+def get_drive_service():
+    return build("drive", "v3", credentials=get_google_creds())
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -262,6 +266,41 @@ TOOLS = [
                 "query": {"type": "string", "description": "Поисковый запрос"}
             },
             "required": ["query"]
+        }
+    },
+    {
+        "name": "drive_search",
+        "description": "Ищет файлы и папки в Google Drive по названию или типу.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Что искать (название файла, часть названия)"},
+                "file_type": {"type": "string", "description": "Тип файла: doc, sheet, pdf, folder, presentation (необязательно)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "drive_read",
+        "description": "Читает содержимое текстового файла или Google Doc из Drive по ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "ID файла из drive_search"}
+            },
+            "required": ["file_id"]
+        }
+    },
+    {
+        "name": "drive_create_doc",
+        "description": "Создаёт новый Google Doc с текстом.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название документа"},
+                "content": {"type": "string", "description": "Содержимое документа"}
+            },
+            "required": ["title"]
         }
     },
     {
@@ -519,6 +558,67 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             ids = [m["id"] for m in messages]
             service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
             return f"Спам очищен: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_search":
+        try:
+            service = get_drive_service()
+            q_parts = [f"name contains '{tool_input['query']}'", "trashed = false"]
+            type_map = {
+                "doc": "application/vnd.google-apps.document",
+                "sheet": "application/vnd.google-apps.spreadsheet",
+                "presentation": "application/vnd.google-apps.presentation",
+                "folder": "application/vnd.google-apps.folder",
+                "pdf": "application/pdf",
+            }
+            if tool_input.get("file_type") and tool_input["file_type"] in type_map:
+                q_parts.append(f"mimeType = '{type_map[tool_input['file_type']]}'")
+            results = service.files().list(
+                q=" and ".join(q_parts),
+                fields="files(id, name, mimeType, modifiedTime, size)",
+                orderBy="modifiedTime desc",
+                pageSize=10
+            ).execute()
+            files = results.get("files", [])
+            if not files:
+                return "Файлы не найдены."
+            lines = []
+            for f in files:
+                mt = f.get("modifiedTime", "")[:10]
+                lines.append(f"ID: {f['id']}\n{f['name']} ({mt})")
+            return "\n\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_read":
+        try:
+            service = get_drive_service()
+            file_id = tool_input["file_id"]
+            meta = service.files().get(fileId=file_id, fields="mimeType, name").execute()
+            mime = meta["mimeType"]
+
+            if mime == "application/vnd.google-apps.document":
+                content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+                return content.decode("utf-8")[:4000]
+            elif mime == "text/plain":
+                content = service.files().get_media(fileId=file_id).execute()
+                return content.decode("utf-8")[:4000]
+            else:
+                return f"Файл '{meta['name']}' нельзя прочитать как текст (тип: {mime})"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_create_doc":
+        try:
+            from googleapiclient.http import MediaInMemoryUpload
+            service = get_drive_service()
+            title = tool_input["title"]
+            content = tool_input.get("content", "")
+            file_meta = {"name": title, "mimeType": "application/vnd.google-apps.document"}
+            media = MediaInMemoryUpload(content.encode("utf-8"), mimetype="text/plain")
+            f = service.files().create(body=file_meta, media_body=media, fields="id, name").execute()
+            return f"Документ создан: {f['name']} (ID: {f['id']})"
         except Exception as e:
             return f"Ошибка: {e}"
 
