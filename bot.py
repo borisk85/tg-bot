@@ -114,7 +114,6 @@ def get_google_creds():
             "https://mail.google.com/",
             "https://www.googleapis.com/auth/tasks",
             "https://www.googleapis.com/auth/drive",
-            "https://www.googleapis.com/auth/contacts.readonly",
         ]
     )
 
@@ -292,17 +291,6 @@ TOOLS = [
                 "file_id": {"type": "string", "description": "ID файла из drive_search"}
             },
             "required": ["file_id"]
-        }
-    },
-    {
-        "name": "contacts_search",
-        "description": "Ищет контакты в Google Contacts по имени, фамилии или email. Используй когда нужно найти чей-то email, телефон или данные контакта.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Имя, фамилия или email для поиска"}
-            },
-            "required": ["query"]
         }
     },
     {
@@ -671,34 +659,6 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             if not images:
                 return "Не удалось изменить изображение."
             return f"IMAGE_URL:{images[0]['url']}"
-        except Exception as e:
-            return f"Ошибка: {e}"
-
-    if name == "contacts_search":
-        try:
-            service = build("people", "v1", credentials=get_google_creds())
-            results = service.people().searchContacts(
-                query=tool_input["query"],
-                readMask="names,emailAddresses,phoneNumbers",
-                pageSize=10
-            ).execute()
-            contacts = results.get("results", [])
-            if not contacts:
-                return "Контакты не найдены."
-            lines = []
-            for c in contacts:
-                p = c.get("person", {})
-                names = p.get("names", [{}])
-                name_ = names[0].get("displayName", "?") if names else "?"
-                emails = [e["value"] for e in p.get("emailAddresses", [])]
-                phones = [ph["value"] for ph in p.get("phoneNumbers", [])]
-                parts = [name_]
-                if emails:
-                    parts.append("Email: " + ", ".join(emails))
-                if phones:
-                    parts.append("Тел: " + ", ".join(phones))
-                lines.append(" | ".join(parts))
-            return "\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"
 
