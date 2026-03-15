@@ -59,16 +59,25 @@ def clear_history(user_id: int):
 
 # ── Google Calendar client ────────────────────────────────────────────────────
 
-def get_calendar_service():
-    creds = Credentials(
+def get_google_creds():
+    return Credentials(
         token=None,
         refresh_token=os.getenv("GOOGLE_REFRESH_TOKEN"),
         client_id=os.getenv("GOOGLE_CLIENT_ID"),
         client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/calendar"]
+        scopes=[
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+        ]
     )
-    return build("calendar", "v3", credentials=creds)
+
+def get_calendar_service():
+    return build("calendar", "v3", credentials=get_google_creds())
+
+def get_gmail_service():
+    return build("gmail", "v1", credentials=get_google_creds())
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -117,6 +126,43 @@ TOOLS = [
         }
     },
     {
+        "name": "gmail_search",
+        "description": "Поиск писем в Gmail. Используй когда пользователь просит найти письма, показать входящие, найти письмо от кого-то.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Поисковый запрос (например: 'from:ivan@gmail.com', 'subject:встреча', 'is:unread')"},
+                "max_results": {"type": "integer", "description": "Максимум писем (по умолчанию 5)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "gmail_read",
+        "description": "Читает конкретное письмо по ID. Используй после gmail_search чтобы прочитать содержимое письма.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "ID письма из результатов gmail_search"}
+            },
+            "required": ["message_id"]
+        }
+    },
+    {
+        "name": "gmail_send",
+        "description": "Отправляет письмо. Используй когда пользователь просит написать или отправить письмо.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Адрес получателя или несколько через запятую"},
+                "subject": {"type": "string", "description": "Тема письма"},
+                "body": {"type": "string", "description": "Текст письма"},
+                "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"}
+            },
+            "required": ["to", "subject", "body"]
+        }
+    },
+    {
         "name": "web_search",
         "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
         "input_schema": {
@@ -150,6 +196,68 @@ def execute_tool(name: str, tool_input: dict) -> str:
         now = datetime.now()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         return f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')}"
+
+    if name == "gmail_search":
+        try:
+            import base64
+            service = get_gmail_service()
+            query = tool_input["query"]
+            max_results = tool_input.get("max_results", 5)
+            result = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+            messages = result.get("messages", [])
+            if not messages:
+                return "Писем не найдено."
+            output = []
+            for msg in messages:
+                m = service.users().messages().get(userId="me", id=msg["id"], format="metadata",
+                    metadataHeaders=["From", "Subject", "Date"]).execute()
+                headers = {h["name"]: h["value"] for h in m["payload"]["headers"]}
+                output.append(f"ID: {msg['id']}\nОт: {headers.get('From','?')}\nТема: {headers.get('Subject','?')}\nДата: {headers.get('Date','?')}")
+            return "\n\n".join(output)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_read":
+        try:
+            import base64
+            service = get_gmail_service()
+            msg = service.users().messages().get(userId="me", id=tool_input["message_id"], format="full").execute()
+            headers = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
+            body = ""
+            if "parts" in msg["payload"]:
+                for part in msg["payload"]["parts"]:
+                    if part["mimeType"] == "text/plain" and "data" in part.get("body", {}):
+                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="ignore")
+                        break
+            elif "data" in msg["payload"].get("body", {}):
+                body = base64.urlsafe_b64decode(msg["payload"]["body"]["data"]).decode("utf-8", errors="ignore")
+            return f"От: {headers.get('From','?')}\nКому: {headers.get('To','?')}\nТема: {headers.get('Subject','?')}\nДата: {headers.get('Date','?')}\n\n{body[:3000]}"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_send":
+        try:
+            import base64
+            from email.mime.text import MIMEText
+            service = get_gmail_service()
+            msg = MIMEText(tool_input["body"])
+            msg["to"] = tool_input["to"]
+            msg["subject"] = tool_input["subject"]
+            if tool_input.get("reply_to_id"):
+                original = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="metadata",
+                    metadataHeaders=["Message-ID", "Subject"]).execute()
+                headers = {h["name"]: h["value"] for h in original["payload"]["headers"]}
+                msg["In-Reply-To"] = headers.get("Message-ID", "")
+                msg["References"] = headers.get("Message-ID", "")
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            body = {"raw": raw}
+            if tool_input.get("reply_to_id"):
+                thread = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="minimal").execute()
+                body["threadId"] = thread.get("threadId")
+            service.users().messages().send(userId="me", body=body).execute()
+            return f"Письмо отправлено на {tool_input['to']}."
+        except Exception as e:
+            return f"Ошибка: {e}"
 
     if name == "web_search":
         try:
