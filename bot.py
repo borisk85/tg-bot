@@ -97,6 +97,7 @@ def get_google_creds():
         scopes=[
             "https://www.googleapis.com/auth/calendar",
             "https://mail.google.com/",
+            "https://www.googleapis.com/auth/tasks",
         ]
     )
 
@@ -105,6 +106,9 @@ def get_calendar_service():
 
 def get_gmail_service():
     return build("gmail", "v1", credentials=get_google_creds())
+
+def get_tasks_service():
+    return build("tasks", "v1", credentials=get_google_creds())
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -228,6 +232,55 @@ TOOLS = [
     {
         "name": "web_search",
         "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Поисковый запрос"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "tasks_list",
+        "description": "Показывает задачи из Google Tasks. Используй когда пользователь просит показать задачи, список дел, заметки.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasklist": {"type": "string", "description": "Название списка задач (по умолчанию основной список)"},
+                "show_completed": {"type": "boolean", "description": "Показывать выполненные задачи (по умолчанию false)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "tasks_create",
+        "description": "Создаёт новую задачу в Google Tasks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название задачи"},
+                "notes": {"type": "string", "description": "Заметка / описание задачи (необязательно)"},
+                "due": {"type": "string", "description": "Срок выполнения в формате YYYY-MM-DD (необязательно)"},
+                "tasklist": {"type": "string", "description": "Название списка (по умолчанию основной)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "tasks_complete",
+        "description": "Отмечает задачу как выполненную.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название задачи (или часть названия)"},
+                "tasklist": {"type": "string", "description": "Название списка (необязательно)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "tasks_search",
+        "description": "Ищет задачи по тексту во всех списках.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -371,6 +424,97 @@ def execute_tool(name: str, tool_input: dict) -> str:
             ids = [m["id"] for m in messages]
             service.users().messages().batchDelete(userId="me", body={"ids": ids}).execute()
             return f"Спам очищен: удалено {len(ids)} писем."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_list":
+        try:
+            service = get_tasks_service()
+            tasklist_name = tool_input.get("tasklist")
+            show_completed = tool_input.get("show_completed", False)
+
+            # Найти нужный список или взять первый
+            lists = service.tasklists().list().execute().get("items", [])
+            if not lists:
+                return "Списков задач не найдено."
+            tasklist_id = lists[0]["id"]
+            tasklist_title = lists[0]["title"]
+            if tasklist_name:
+                for tl in lists:
+                    if tasklist_name.lower() in tl["title"].lower():
+                        tasklist_id = tl["id"]
+                        tasklist_title = tl["title"]
+                        break
+
+            params = {"tasklist": tasklist_id, "showHidden": show_completed}
+            if show_completed:
+                params["showCompleted"] = True
+            tasks = service.tasks().list(**params).execute().get("items", [])
+            if not tasks:
+                return f"В списке «{tasklist_title}» нет задач."
+
+            result = [f"📋 {tasklist_title}:"]
+            for t in tasks:
+                status = "✅" if t.get("status") == "completed" else "⬜"
+                due = f" (до {t['due'][:10]})" if t.get("due") else ""
+                notes = f"\n   {t['notes']}" if t.get("notes") else ""
+                result.append(f"{status} {t['title']}{due}{notes}")
+            return "\n".join(result)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_create":
+        try:
+            service = get_tasks_service()
+            tasklist_name = tool_input.get("tasklist")
+            lists = service.tasklists().list().execute().get("items", [])
+            tasklist_id = lists[0]["id"] if lists else "@default"
+            if tasklist_name and lists:
+                for tl in lists:
+                    if tasklist_name.lower() in tl["title"].lower():
+                        tasklist_id = tl["id"]
+                        break
+
+            task = {"title": tool_input["title"]}
+            if tool_input.get("notes"):
+                task["notes"] = tool_input["notes"]
+            if tool_input.get("due"):
+                task["due"] = f"{tool_input['due']}T00:00:00.000Z"
+
+            created = service.tasks().insert(tasklist=tasklist_id, body=task).execute()
+            return f"Задача создана: «{created['title']}»"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_complete":
+        try:
+            service = get_tasks_service()
+            query = tool_input["title"].lower()
+            lists = service.tasklists().list().execute().get("items", [])
+            for tl in lists:
+                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                for t in tasks:
+                    if query in t["title"].lower() and t.get("status") != "completed":
+                        t["status"] = "completed"
+                        service.tasks().update(tasklist=tl["id"], task=t["id"], body=t).execute()
+                        return f"Выполнено: «{t['title']}»"
+            return f"Задача «{tool_input['title']}» не найдена."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_search":
+        try:
+            service = get_tasks_service()
+            query = tool_input["query"].lower()
+            lists = service.tasklists().list().execute().get("items", [])
+            found = []
+            for tl in lists:
+                tasks = service.tasks().list(tasklist=tl["id"], showHidden=True, showCompleted=True).execute().get("items", [])
+                for t in tasks:
+                    if query in t["title"].lower() or query in t.get("notes", "").lower():
+                        status = "✅" if t.get("status") == "completed" else "⬜"
+                        found.append(f"{status} [{tl['title']}] {t['title']}")
+            return "\n".join(found) if found else "Ничего не найдено."
         except Exception as e:
             return f"Ошибка: {e}"
 
