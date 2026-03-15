@@ -246,6 +246,17 @@ TOOLS = [
         }
     },
     {
+        "name": "get_token_info",
+        "description": "Получает информацию о токене по адресу контракта (Solana, ETH, BSC и др.) через Dexscreener. Используй когда дают адрес контракта.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Адрес контракта токена"}
+            },
+            "required": ["address"]
+        }
+    },
+    {
         "name": "get_crypto_prices",
         "description": "Получает текущие курсы криптовалют (BTC, SOL, ETH и любых других) и курс тенге к доллару.",
         "input_schema": {
@@ -460,6 +471,34 @@ def execute_tool(name: str, tool_input: dict) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
+    if name == "get_token_info":
+        try:
+            address = tool_input["address"]
+            resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{address}")
+            data = resp.json()
+            pairs = data.get("pairs", [])
+            if not pairs:
+                return f"Токен с адресом {address} не найден на Dexscreener."
+            p = pairs[0]
+            name_ = p.get("baseToken", {}).get("name", "?")
+            symbol = p.get("baseToken", {}).get("symbol", "?")
+            price = p.get("priceUsd", "?")
+            change_1h = p.get("priceChange", {}).get("h1", 0)
+            change_24h = p.get("priceChange", {}).get("h24", 0)
+            vol_24h = p.get("volume", {}).get("h24", 0)
+            liq = p.get("liquidity", {}).get("usd", 0)
+            chain = p.get("chainId", "?")
+            dex = p.get("dexId", "?")
+            return (
+                f"🔍 {name_} ({symbol}) на {chain}/{dex}\n"
+                f"💲 Цена: ${price}\n"
+                f"📈 1h: {change_1h:+.1f}% | 24h: {change_24h:+.1f}%\n"
+                f"💧 Ликвидность: ${liq:,.0f}\n"
+                f"📊 Объём 24h: ${vol_24h:,.0f}"
+            )
+        except Exception as e:
+            return f"Ошибка: {e}"
+
     if name == "get_crypto_prices":
         try:
             coins = tool_input.get("coins", ["bitcoin", "solana", "ethereum"])
@@ -486,13 +525,8 @@ def execute_tool(name: str, tool_input: dict) -> str:
                     lines.append(f"❓ {coin}: не найдено")
 
             if include_kzt:
-                resp2 = requests.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={"ids": "tether", "vs_currencies": "kzt"},
-                    headers={"Accept": "application/json"}
-                )
-                kzt_data = resp2.json()
-                kzt = kzt_data.get("tether", {}).get("kzt", 0)
+                resp2 = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
+                kzt = resp2.json().get("rates", {}).get("KZT", 0)
                 if kzt:
                     lines.append(f"💵 USD/KZT: {kzt:,.0f} ₸")
 
@@ -755,9 +789,16 @@ def execute_tool(name: str, tool_input: dict) -> str:
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
-async def run_agent(user_id: int, user_text: str) -> str:
+async def run_agent(user_id: int, user_text: str, image_data: dict = None) -> str:
     history = get_history(user_id)
-    history.append({"role": "user", "content": user_text})
+    if image_data:
+        user_content = [
+            {"type": "image", "source": {"type": "base64", "media_type": image_data["media_type"], "data": image_data["data"]}},
+            {"type": "text", "text": user_text or "Что на этом изображении?"}
+        ]
+    else:
+        user_content = user_text
+    history.append({"role": "user", "content": user_content})
 
     if len(history) > 40:
         history = history[-40:]
@@ -829,12 +870,25 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_text = update.message.text
+    user_text = update.message.text or update.message.caption or ""
+    image_data = None
+
+    if update.message.photo:
+        import base64
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        file_bytes = await file.download_as_bytearray()
+        image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
+    elif update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/"):
+        import base64
+        file = await context.bot.get_file(update.message.document.file_id)
+        file_bytes = await file.download_as_bytearray()
+        image_data = {"media_type": update.message.document.mime_type, "data": base64.b64encode(file_bytes).decode()}
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
-        reply = await run_agent(user_id, user_text)
+        reply = await run_agent(user_id, user_text, image_data)
         for i in range(0, len(reply), 4096):
             await update.message.reply_text(reply[i:i + 4096])
     except Exception as e:
@@ -851,7 +905,7 @@ def main():
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.IMAGE) & ~filters.COMMAND, handle_message))
 
     logger.info("Бот запущен!")
     try:
