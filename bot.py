@@ -1261,11 +1261,33 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
+async def send_voice_reminder(bot, user_id: int, text: str):
+    """Отправляет голосовое напоминание через ElevenLabs, fallback на текст."""
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+        return
+    try:
+        import io
+        from elevenlabs.client import ElevenLabs
+        from elevenlabs import VoiceSettings
+        client = ElevenLabs(api_key=api_key)
+        audio = client.text_to_speech.convert(
+            voice_id="pNInz6obpgDQGcFmaJgB",  # Adam — чёткий мужской голос
+            text=f"Напоминание: {text}",
+            model_id="eleven_multilingual_v2",
+            voice_settings=VoiceSettings(stability=0.5, similarity_boost=0.75)
+        )
+        audio_bytes = b"".join(audio)
+        await bot.send_voice(chat_id=user_id, voice=io.BytesIO(audio_bytes))
+    except Exception as e:
+        logger.error(f"ElevenLabs ошибка: {e}")
+        await bot.send_message(chat_id=user_id, text=f"Напоминание: {text}")
+
 async def check_reminders(context):
     if not redis_client:
         return
     now = now_local()
-    # Сканируем все ключи напоминаний
     for key in redis_client.scan_iter("reminders:*"):
         user_id = int(key.split(":")[1])
         reminders = get_reminders(user_id)
@@ -1275,7 +1297,7 @@ async def check_reminders(context):
                 r["done"] = True
                 changed = True
                 try:
-                    await context.bot.send_message(chat_id=user_id, text=f"Напоминание: {r['text']}")
+                    await send_voice_reminder(context.bot, user_id, r["text"])
                 except Exception as e:
                     logger.error(f"Ошибка отправки напоминания: {e}")
         if changed:
