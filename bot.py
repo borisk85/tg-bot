@@ -1267,10 +1267,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import base64
             image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
         elif mime == "text/plain":
-            user_text = (file_bytes.decode("utf-8", errors="ignore")[:4000] + "\n\n" + user_text).strip()
+            text_content = file_bytes.decode("utf-8", errors="ignore")[:4000]
+            user_text = f"Содержимое файла {fname}:\n{text_content}\n\n{user_text}".strip()
+        elif mime == "application/pdf":
+            try:
+                import io
+                from PyPDF2 import PdfReader
+                reader = PdfReader(io.BytesIO(bytes(file_bytes)))
+                text_content = "\n".join(page.extract_text() or "" for page in reader.pages)[:4000]
+                user_text = f"Содержимое PDF {fname}:\n{text_content}\n\n{user_text}".strip()
+            except Exception:
+                user_text = f"[PDF: {fname}] {user_text}".strip()
+        elif mime in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"):
+            try:
+                import io
+                from docx import Document
+                doc = Document(io.BytesIO(bytes(file_bytes)))
+                text_content = "\n".join(p.text for p in doc.paragraphs)[:4000]
+                user_text = f"Содержимое документа {fname}:\n{text_content}\n\n{user_text}".strip()
+            except Exception:
+                user_text = f"[Word: {fname}] {user_text}".strip()
         else:
-            # PDF, Word и др. — передаём имя файла, Claude попробует помочь
-            user_text = f"[Файл: {fname}]\n{user_text}" if user_text else f"Проанализируй файл: {fname}"
+            user_text = f"[Файл: {fname}] {user_text}".strip()
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
