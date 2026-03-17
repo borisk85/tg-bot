@@ -1241,8 +1241,8 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         user_content = user_text
     history.append({"role": "user", "content": user_content})
 
-    if len(history) > 40:
-        history = history[-40:]
+    if len(history) > 15:
+        history = history[-15:]
 
     messages = list(history)
     now = now_local()
