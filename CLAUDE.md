@@ -29,6 +29,9 @@ REDIS_URL               — URL Redis (Railway Redis plugin)
 BRAVE_API_KEY           — Brave Search API
 OPENWEATHER_API_KEY     — OpenWeatherMap API
 FAL_API_KEY             — fal.ai (генерация изображений)
+REDDIT_CLIENT_ID        — Reddit API (опционально, для дайджеста)
+REDDIT_CLIENT_SECRET    — Reddit API (опционально, для дайджеста)
+REDDIT_USER_AGENT       — Reddit API user agent (опционально, напр. tg-bot-digest/1.0)
 ```
 
 ## Запуск локально
@@ -72,7 +75,14 @@ git push
 
 ## Спецфункции
 - Утренний дайджест в 11:00 Almaty — погода + события + задачи (user_id=661638470)
-- Загрузка файла/фото в Drive — отправить с подписью "в drive"
+- Конкурентный радар `/ai_agents_digest` — каждый пн в 12:00 Almaty, автоматически (user_id=661638470)
+  - Источники: Brave Search + HackerNews (+ Reddit если есть ключи)
+  - Тема: ИИ-агенты / ИИ-ассистенты / чат-боты / платформы без кода
+  - Фильтр под профиль продукта (SaaS персональных ИИ-ботов в Telegram, B2C СНГ)
+  - Метки угроз: 🔴 высокая / 🟡 средняя / 🟢 низкая
+  - Функция: `send_weekly_ai_digest()` в bot.py
+  - Детали настроек: memory/skill_competitive_radar.md
+- Загрузка файла/фото в Drive — отправить с подписью "в drive" (поддержка альбомов и создания папки)
 - Чтение PDF и Word документов
 - Калории — нативно через Claude (без API)
 - Анализ фото — нативно через Claude Vision
