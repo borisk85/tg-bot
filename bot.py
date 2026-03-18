@@ -150,7 +150,13 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 - Google Tasks, список «Идеи» — идеи, мысли, заметки, записать что-то на память
 
 Контакты пользователя:
-- Жена: Дана, dana.aristanbayeva@gmail.com"""
+- Жена: Дана, dana.aristanbayeva@gmail.com
+
+Команды бота:
+/clear — очистить историю
+/help — список возможностей
+/myid — Telegram ID
+/ai_agents_digest — запустить конкурентный радар по ИИ-агентам и ботам прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
 
 # ── Tool definitions ──────────────────────────────────────────────────────────
 
@@ -1638,7 +1644,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Фото — анализ любого изображения\n"
         "Генерация изображений — по текстовому описанию (FLUX)\n"
         "PDF / Word — прочитает и ответит на вопросы\n\n"
-        "Утренний дайджест в 11:00 — погода + события + задачи"
+        "Утренний дайджест в 11:00 — погода + события + задачи\n"
+        "/ai_agents_digest — конкурентный радар по ИИ-ботам (запустить вручную)"
     )
 
 async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context, folder_id: str = None):
@@ -1832,6 +1839,18 @@ def main():
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
+
+    # Регистрируем команды в меню Telegram
+    from telegram import BotCommand
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            BotCommand("start", "Начать"),
+            BotCommand("help", "Список возможностей"),
+            BotCommand("clear", "Очистить историю чата"),
+            BotCommand("myid", "Мой Telegram ID"),
+            BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
+        ])
+    app.post_init = post_init
 
     logger.info("Бот запущен!")
     try:
