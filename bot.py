@@ -1795,7 +1795,7 @@ def main():
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
     import datetime as dt
     app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
-    app.job_queue.run_weekly(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), day_of_week=0)  # 0=пн
+    app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(0,))  # 0=пн
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("clear", cmd_clear))
