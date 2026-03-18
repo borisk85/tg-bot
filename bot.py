@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 import pytz
 TZ = pytz.timezone("Asia/Almaty")
@@ -1454,15 +1455,82 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Утренний дайджест в 11:00 — погода + события + задачи"
     )
 
-async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context):
+async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context, folder_id: str = None):
     try:
         from googleapiclient.http import MediaInMemoryUpload
         service = get_drive_service()
         media = MediaInMemoryUpload(file_bytes, mimetype=mime)
-        f = service.files().create(body={"name": filename}, media_body=media, fields="id, name").execute()
+        body = {"name": filename}
+        if folder_id:
+            body["parents"] = [folder_id]
+        f = service.files().create(body=body, media_body=media, fields="id, name").execute()
         await update.message.reply_text(f"Файл '{f['name']}' загружен в Google Drive.")
     except Exception as e:
         await update.message.reply_text(f"Ошибка загрузки в Drive: {e}")
+
+def _get_or_create_drive_folder(service, folder_name: str) -> str:
+    """Ищет папку по имени в Drive, создаёт если не найдена. Возвращает folder_id."""
+    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
+    if files:
+        return files[0]["id"]
+    folder = service.files().create(
+        body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder"},
+        fields="id"
+    ).execute()
+    return folder["id"]
+
+# Буфер медиа-групп (альбомов): {group_id: {photos, caption, ...}}
+_media_group_buffer: dict = {}
+
+async def _process_media_group(group_id: str, context):
+    """Обрабатывает альбом фото после накопления всех сообщений."""
+    await asyncio.sleep(1.5)  # Ждём пока придут все фото альбома
+    if group_id not in _media_group_buffer:
+        return
+    data = _media_group_buffer.pop(group_id)
+    update = data["first_update"]
+    photos = data["photos"]
+    upload_to_drive = data["upload_to_drive"]
+    caption = data["caption"]
+    user_id = data["user_id"]
+
+    if upload_to_drive:
+        # Определяем имя папки из caption (ищем "в папку <название>")
+        folder_id = None
+        import re
+        m = re.search(r"в\s+папк[уе]\s+([^\s(,]+)", caption.lower())
+        if m:
+            folder_name = m.group(1).strip()
+            try:
+                service = get_drive_service()
+                folder_id = _get_or_create_drive_folder(service, folder_name)
+                await update.message.reply_text(f"Папка '{folder_name}' готова.")
+            except Exception as e:
+                await update.message.reply_text(f"Не удалось создать папку: {e}")
+
+        for i, photo_bytes in enumerate(photos, start=1):
+            fname = f"photo_{i}.jpg" if len(photos) > 1 else "photo.jpg"
+            await _upload_to_drive(photo_bytes, fname, "image/jpeg", update, context, folder_id=folder_id)
+        return
+
+    # Не Drive-загрузка — отправляем в агент только первое фото (как раньше)
+    import base64
+    image_data = {"media_type": "image/jpeg", "data": base64.b64encode(photos[0]).decode()}
+    user_text = caption
+
+    async def send_photo(url: str):
+        await update.message.reply_photo(photo=url)
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    try:
+        reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
+        for i in range(0, len(reply), 4096):
+            await update.message.reply_text(reply[i:i + 4096])
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1478,6 +1546,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
         file_bytes = await tg_file.download_as_bytearray()
+
+        # Альбом (несколько фото) — буферизуем все фото и обрабатываем вместе
+        if update.message.media_group_id:
+            group_id = update.message.media_group_id
+            if group_id not in _media_group_buffer:
+                _media_group_buffer[group_id] = {
+                    "photos": [],
+                    "caption": update.message.caption or "",
+                    "upload_to_drive": upload_to_drive,
+                    "first_update": update,
+                    "user_id": user_id,
+                }
+                asyncio.create_task(_process_media_group(group_id, context))
+            else:
+                # Обновляем caption если у этого сообщения он есть
+                if update.message.caption:
+                    _media_group_buffer[group_id]["caption"] = update.message.caption
+                    _media_group_buffer[group_id]["upload_to_drive"] = upload_to_drive
+            _media_group_buffer[group_id]["photos"].append(bytes(file_bytes))
+            return
+
         if upload_to_drive:
             await _upload_to_drive(bytes(file_bytes), "photo.jpg", "image/jpeg", update, context)
             return
