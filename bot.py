@@ -1302,6 +1302,158 @@ async def send_voice_reminder(bot, user_id: int, text: str):
     clean_text = re.sub(r'[^\w\s\.,!?:;\-\(\)«»"\']+', '', text).strip()
     await bot.send_message(chat_id=user_id, text=f"Напоминание: {clean_text}")
 
+def _brave_search(query: str, count: int = 8) -> list[dict]:
+    """Выполняет поиск через Brave Search, возвращает список {title, description, url}."""
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": os.getenv("BRAVE_API_KEY"),
+    }
+    resp = requests.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        headers=headers,
+        params={"q": query, "count": count, "freshness": "pw"},  # pw = past week
+        timeout=10,
+    )
+    return resp.json().get("web", {}).get("results", [])
+
+
+def _hn_search(query: str) -> list[dict]:
+    """Ищет в HackerNews через Algolia API, возвращает список {title, url, points}."""
+    resp = requests.get(
+        "https://hn.algolia.com/api/v1/search",
+        params={"query": query, "tags": "story", "numericFilters": "created_at_i>{}".format(
+            int(__import__("time").time()) - 7 * 24 * 3600
+        ), "hitsPerPage": 10},
+        timeout=10,
+    )
+    hits = resp.json().get("hits", [])
+    return [{"title": h["title"], "url": h.get("url", ""), "points": h.get("points", 0)} for h in hits]
+
+
+async def send_weekly_ai_digest(context):
+    """Еженедельный дайджест трендов по ИИ-агентам/ассистентам/ботам — каждый пн в 12:00."""
+    user_id = 661638470
+    try:
+        await context.bot.send_chat_action(chat_id=user_id, action="typing")
+
+        # ── Brave Search: строго по нише ─────────────────────────────────────
+        BRAVE_QUERIES = [
+            "AI agent platform news this week",
+            "AI assistant SaaS product launch 2026",
+            "chatbot builder tool update this week",
+            "AI bot automation agent trending",
+        ]
+        brave_items = []
+        for q in BRAVE_QUERIES:
+            try:
+                results = _brave_search(q, count=6)
+                for r in results:
+                    brave_items.append(f"- {r['title']}: {r.get('description', '')[:120]} ({r['url']})")
+            except Exception:
+                pass
+
+        # ── HackerNews: только по нашим ключевым словам ──────────────────────
+        HN_QUERIES = ["AI agent", "AI assistant", "chatbot platform", "AI bot"]
+        # Слова-исключения чтобы не тянуть общий LLM/ML шум
+        EXCLUDE_WORDS = {"llm training", "fine-tuning", "dataset", "paper", "arxiv", "benchmark", "model weights"}
+        hn_items = []
+        seen_titles = set()
+        for q in HN_QUERIES:
+            try:
+                hits = _hn_search(q)
+                for h in hits:
+                    title_low = h["title"].lower()
+                    if h["title"] in seen_titles:
+                        continue
+                    if any(ex in title_low for ex in EXCLUDE_WORDS):
+                        continue
+                    seen_titles.add(h["title"])
+                    hn_items.append(f"- [{h['points']}pts] {h['title']} ({h['url']})")
+            except Exception:
+                pass
+
+        # ── Reddit (если настроен) ────────────────────────────────────────────
+        reddit_items = []
+        reddit_id = os.getenv("REDDIT_CLIENT_ID")
+        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET")
+        if reddit_id and reddit_secret:
+            try:
+                import praw
+                reddit = praw.Reddit(
+                    client_id=reddit_id,
+                    client_secret=reddit_secret,
+                    user_agent=os.getenv("REDDIT_USER_AGENT", "tg-bot-digest/1.0"),
+                )
+                SUBREDDITS = ["AIAssistants", "chatbot", "artificial", "LocalLLaMA", "SaaS"]
+                INCLUDE_WORDS = {"agent", "assistant", "chatbot", "bot", "copilot", "autonomous"}
+                for sub_name in SUBREDDITS:
+                    try:
+                        sub = reddit.subreddit(sub_name)
+                        for post in sub.top(time_filter="week", limit=15):
+                            title_low = post.title.lower()
+                            if not any(w in title_low for w in INCLUDE_WORDS):
+                                continue
+                            reddit_items.append(
+                                f"- [r/{sub_name}, {post.score}↑] {post.title} ({post.url})"
+                            )
+                    except Exception:
+                        pass
+            except ImportError:
+                pass
+
+        # ── Формируем промпт для Claude ──────────────────────────────────────
+        now = now_local()
+        raw_data = []
+        if brave_items:
+            raw_data.append("=== WEB (Brave Search) ===\n" + "\n".join(brave_items[:30]))
+        if hn_items:
+            raw_data.append("=== HACKER NEWS ===\n" + "\n".join(hn_items[:20]))
+        if reddit_items:
+            raw_data.append("=== REDDIT ===\n" + "\n".join(reddit_items[:30]))
+
+        if not raw_data:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ Недельный дайджест: не удалось получить данные.")
+            return
+
+        prompt = f"""Ты аналитик рынка ИИ-ассистентов и чат-ботов.
+
+Ниже — сырые данные из интернета за последнюю неделю (неделя до {now.strftime('%d.%m.%Y')}).
+Твоя задача: выбрать ТОП-10 самых важных/интересных ТРЕНДОВ строго по теме:
+ИИ-агенты / ИИ-ассистенты / чат-боты / AI-боты / SaaS-платформы для их создания.
+
+НЕ включай: общие новости про LLM/GPT, академические статьи, датасеты, обучение моделей.
+ВКЛЮЧАЙ: новые продукты, платформы, инструменты, конкуренты, обновления, бизнес-кейсы.
+
+Формат вывода — строго:
+🔥 НЕДЕЛЬНЫЙ ДАЙДЖЕСТ: ИИ-агенты и ассистенты ({now.strftime('%d.%m.%Y')})
+
+1. [Тема] — краткое описание (1-2 предложения). Источник: ссылка
+2. ...
+...
+10. ...
+
+В конце: 2-3 предложения — общий вывод о трендах недели и что это значит для SaaS в нише ИИ-ботов.
+
+ДАННЫЕ:
+{chr(10).join(raw_data)}"""
+
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        digest_text = response.content[0].text
+
+        for i in range(0, len(digest_text), 4096):
+            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096])
+
+    except Exception as e:
+        logger.error(f"Weekly digest error: {e}", exc_info=True)
+        await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка недельного дайджеста: {e}")
+
+
 async def send_morning_digest(context):
     user_id = 661638470
     try:
@@ -1639,6 +1791,7 @@ def main():
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
     import datetime as dt
     app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
+    app.job_queue.run_weekly(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), day_of_week=0)  # 0=пн
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("clear", cmd_clear))
