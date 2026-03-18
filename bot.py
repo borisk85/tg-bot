@@ -1577,7 +1577,7 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
 
-async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
 
@@ -1800,7 +1800,7 @@ def main():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
-    app.add_handler(CommandHandler("digest", cmd_digest))
+    app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     logger.info("Бот запущен!")
