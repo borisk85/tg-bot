@@ -1279,6 +1279,16 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 
     if len(history) > 15:
         history = history[-15:]
+        # Убираем осиротевшие tool_result в начале истории:
+        # если первое сообщение — user с tool_result блоками без предшествующего tool_use
+        while history and history[0]["role"] == "user":
+            content = history[0]["content"]
+            if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+            ):
+                history = history[1:]  # убираем осиротевший tool_result
+            else:
+                break
 
     messages = list(history)
     now = now_local()
