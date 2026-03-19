@@ -227,7 +227,7 @@ TOOLS = [
     },
     {
         "name": "gmail_send",
-        "description": "Отправляет письмо. Используй когда пользователь просит написать или отправить письмо.",
+        "description": "Отправляет письмо. Если пользователь прислал файл и просит отправить письмо — вложение прикрепится автоматически.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -564,23 +564,46 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         try:
             import base64
             from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.base import MIMEBase
+            from email import encoders
             service = get_gmail_service()
-            msg = MIMEText(tool_input["body"])
+
+            # Проверяем есть ли вложение от пользователя
+            attachment = _pending_attachments.pop(user_id, None) if user_id else None
+
+            if attachment:
+                msg = MIMEMultipart()
+                msg.attach(MIMEText(tool_input["body"], "plain", "utf-8"))
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(attachment["bytes"])
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", f'attachment; filename="{attachment["filename"]}"')
+                part.add_header("Content-Type", attachment["mime"])
+                msg.attach(part)
+            else:
+                msg = MIMEText(tool_input["body"], "plain", "utf-8")
+
             msg["to"] = tool_input["to"]
             msg["subject"] = tool_input["subject"]
+
             if tool_input.get("reply_to_id"):
                 original = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="metadata",
                     metadataHeaders=["Message-ID", "Subject"]).execute()
                 headers = {h["name"]: h["value"] for h in original["payload"]["headers"]}
                 msg["In-Reply-To"] = headers.get("Message-ID", "")
                 msg["References"] = headers.get("Message-ID", "")
+
             raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
             body = {"raw": raw}
             if tool_input.get("reply_to_id"):
                 thread = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="minimal").execute()
                 body["threadId"] = thread.get("threadId")
             service.users().messages().send(userId="me", body=body).execute()
-            return f"Письмо отправлено на {tool_input['to']}."
+            result = f"Письмо отправлено на {tool_input['to']}."
+            if attachment:
+                result += f" Вложение: {attachment['filename']}."
+            return result
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -1683,6 +1706,9 @@ def _get_or_create_drive_folder(service, folder_name: str) -> str:
 # Буфер медиа-групп (альбомов): {group_id: {photos, caption, ...}}
 _media_group_buffer: dict = {}
 
+# Буфер вложений для Gmail: {user_id: {bytes, filename, mime}}
+_pending_attachments: dict = {}
+
 async def _process_media_group(group_id: str, context):
     """Обрабатывает альбом фото после накопления всех сообщений."""
     await asyncio.sleep(1.5)  # Ждём пока придут все фото альбома
@@ -1787,6 +1813,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if upload_to_drive:
             await _upload_to_drive(bytes(file_bytes), fname, mime, update, context)
             return
+        # Сохраняем файл в буфер — может понадобиться как вложение к письму
+        _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": fname, "mime": mime}
         if mime.startswith("image/"):
             import base64
             image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
