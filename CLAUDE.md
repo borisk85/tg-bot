@@ -59,7 +59,7 @@ git push
 ## Текущие инструменты
 - `get_current_datetime` — текущая дата и время
 - `calendar_list_events` / `calendar_create_event` / `calendar_delete_event` — Google Calendar
-- `gmail_search` / `gmail_read` / `gmail_send` — Gmail
+- `gmail_search` / `gmail_read` / `gmail_send` — Gmail (send поддерживает вложения)
 - `gmail_trash` / `gmail_trash_many` / `gmail_empty_trash` / `gmail_empty_spam` — удаление писем
 - `tasks_list` / `tasks_create` / `tasks_complete` / `tasks_search` — Google Tasks (списки Задачи и Идеи)
 - `drive_search` / `drive_read` / `drive_create_doc` / `drive_create_sheet` / `drive_create_slides` / `drive_create_folder` / `drive_move_file` — Google Drive
@@ -83,9 +83,19 @@ git push
   - Функция: `send_weekly_ai_digest()` в bot.py
   - Детали настроек: memory/skill_competitive_radar.md
 - Загрузка файла/фото в Drive — отправить с подписью "в drive" (поддержка альбомов и создания папки)
+- Отправка письма с вложением — скинуть файл в чат + попросить отправить письмо
+  - Паттерн: `_pending_attachments[user_id]` хранит последний файл из чата
+  - `gmail_send` подхватывает его автоматически через MIMEMultipart
+  - Работает для любых форматов: xlsx, pdf, docx, и т.д.
 - Чтение PDF и Word документов
 - Калории — нативно через Claude (без API)
 - Анализ фото — нативно через Claude Vision
+
+## Технические особенности
+- История обрезается до 15 сообщений. При обрезке автоматически удаляются осиротевшие `tool_result` блоки в начале (иначе Claude падает с BadRequestError 400)
+- Медиа-группы (альбомы): буферизация 1.5с через `_media_group_buffer` + asyncio
+- Меню бота регистрируется через `app.post_init` → `set_my_commands()` при старте
+- `run_weekly` отсутствует в python-telegram-bot v21 → используем `run_daily(days=(0,))`
 
 ## Модель
 `claude-sonnet-4-6` — менять в `run_agent()` в bot.py

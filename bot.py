@@ -1863,7 +1863,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reply[i:i + 4096])
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        await update.message.reply_text(f"Ошибка: {type(e).__name__}: {e}")
+        await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
