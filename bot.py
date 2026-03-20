@@ -196,8 +196,7 @@ TOOLS = [
                 "date": {"type": "string", "description": "Дата в формате YYYY-MM-DD"},
                 "time": {"type": "string", "description": "Время начала в формате HH:MM"},
                 "duration_minutes": {"type": "integer", "description": "Продолжительность в минутах (по умолчанию 60)"},
-                "description": {"type": "string", "description": "Описание события (необязательно)"},
-                "reminder_minutes": {"type": "integer", "description": "За сколько минут напомнить (по умолчанию 30)"}
+                "description": {"type": "string", "description": "Описание события (необязательно)"}
             },
             "required": ["title", "date", "time"]
         }
@@ -1188,9 +1187,16 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             result = []
             for e in events:
                 start = e["start"].get("dateTime", e["start"].get("date", ""))
+                end = e["end"].get("dateTime", e["end"].get("date", ""))
                 if "T" in start:
-                    dt = datetime.fromisoformat(start)
-                    start_str = dt.strftime("%d.%m %H:%M")
+                    dt_start = datetime.fromisoformat(start)
+                    start_str = dt_start.strftime("%d.%m %H:%M")
+                    if "T" in end:
+                        dt_end = datetime.fromisoformat(end)
+                        diff = int((dt_end - dt_start).total_seconds() // 60)
+                        hours, mins = divmod(diff, 60)
+                        dur_str = f"{hours}ч" if mins == 0 else f"{hours}ч {mins}мин" if hours else f"{mins}мин"
+                        start_str += f"–{dt_end.strftime('%H:%M')} ({dur_str})"
                 else:
                     start_str = start
                 result.append(f"• {start_str} — {e['summary']}")
@@ -1206,7 +1212,6 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             date = tool_input["date"]
             time = tool_input["time"]
             duration = tool_input.get("duration_minutes", 60)
-            reminder = tool_input.get("reminder_minutes", 30)
             description = tool_input.get("description", "")
 
             from datetime import timedelta
@@ -1218,17 +1223,13 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 "description": description,
                 "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Almaty"},
                 "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Almaty"},
-                "reminders": {
-                    "useDefault": False,
-                    "overrides": [
-                        {"method": "popup", "minutes": reminder},
-                        {"method": "email", "minutes": reminder}
-                    ]
-                }
+                "reminders": {"useDefault": True}
             }
 
-            created = service.events().insert(calendarId="primary", body=event).execute()
-            return f"Создано: «{title}» {date} в {time}. Напоминание за {reminder} мин."
+            service.events().insert(calendarId="primary", body=event).execute()
+            hours, mins = divmod(duration, 60)
+            dur_str = f"{hours}ч" if mins == 0 else f"{hours}ч {mins}мин" if hours else f"{mins}мин"
+            return f"Готово! «{title}» — {date} в {time}, длительность {dur_str}."
         except Exception as e:
             return f"Ошибка: {e}"
 
