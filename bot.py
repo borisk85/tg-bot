@@ -1193,10 +1193,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     start_str = dt_start.strftime("%d.%m %H:%M")
                     if "T" in end:
                         dt_end = datetime.fromisoformat(end)
-                        diff = int((dt_end - dt_start).total_seconds() // 60)
-                        hours, mins = divmod(diff, 60)
-                        dur_str = f"{hours}ч" if mins == 0 else f"{hours}ч {mins}мин" if hours else f"{mins}мин"
-                        start_str += f"–{dt_end.strftime('%H:%M')} ({dur_str})"
+                        start_str += f"–{dt_end.strftime('%H:%M')}"
                 else:
                     start_str = start
                 result.append(f"• {start_str} — {e['summary']}")
