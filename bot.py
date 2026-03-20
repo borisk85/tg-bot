@@ -1344,7 +1344,7 @@ async def send_voice_reminder(bot, user_id: int, text: str):
     """Отправляет текстовое напоминание."""
     import re
     clean_text = re.sub(r'[^\w\s\.,!?:;\-\(\)«»"\']+', '', text).strip()
-    await bot.send_message(chat_id=user_id, text=f"Напоминание: {clean_text}")
+    await bot.send_message(chat_id=user_id, text=f"Напоминаю: {clean_text}")
 
 def _brave_search(query: str, count: int = 8) -> list[dict]:
     """Выполняет поиск через Brave Search, возвращает список {title, description, url}."""
