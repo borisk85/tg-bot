@@ -1555,11 +1555,24 @@ async def send_morning_digest(context):
             resp2 = requests.get("https://api.openweathermap.org/data/2.5/forecast",
                 params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8})
             forecast = resp2.json()
-            temps = [i["main"]["temp"] for i in forecast["list"]]
-            descriptions = [i["weather"][0]["description"] for i in forecast["list"]]
+            # Только дневные интервалы 7:00–21:00
+            day_items = [i for i in forecast["list"]
+                         if 7 <= datetime.fromisoformat(i["dt_txt"].replace(" ", "T")).hour <= 21]
+            if not day_items:
+                day_items = forecast["list"]
+            temps = [i["main"]["temp"] for i in day_items]
             t_min, t_max = min(temps), max(temps)
-            rain = any("дождь" in d or "rain" in d or "ливень" in d for d in descriptions)
-            snow = any("снег" in d or "snow" in d for d in descriptions)
+            # Осадки только если вероятность >= 40% (pop = 0..1)
+            rain = any(
+                ("дождь" in i["weather"][0]["description"] or "rain" in i["weather"][0]["description"] or "ливень" in i["weather"][0]["description"])
+                and i.get("pop", 0) >= 0.4
+                for i in day_items
+            )
+            snow = any(
+                ("снег" in i["weather"][0]["description"] or "snow" in i["weather"][0]["description"])
+                and i.get("pop", 0) >= 0.4
+                for i in day_items
+            )
             precip = "Ожидается дождь, зонт пригодится." if rain else ("Ожидается снег." if snow else "Осадков не ожидается.")
             lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}C. {precip}")
             lines.append("")
