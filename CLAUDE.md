@@ -95,7 +95,8 @@ git push
 - История обрезается до 15 сообщений. При обрезке автоматически удаляются осиротевшие `tool_result` блоки в начале (иначе Claude падает с BadRequestError 400)
 - Медиа-группы (альбомы): буферизация 1.5с через `_media_group_buffer` + asyncio
 - Меню бота регистрируется через `app.post_init` → `set_my_commands()` при старте
-- `run_weekly` отсутствует в python-telegram-bot v21 → используем `run_daily(days=(0,))`
+- `run_weekly` отсутствует в python-telegram-bot v21 → используем `run_daily(days=(1,))` для понедельника (0=вс, 1=пн!)
+- Автоматические дайджесты записываются в Redis историю после отправки — иначе бот не помнит что отправлял
 
 ## Модель
 `claude-sonnet-4-6` — менять в `run_agent()` в bot.py
