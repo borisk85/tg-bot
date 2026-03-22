@@ -399,13 +399,13 @@ TOOLS = [
     },
     {
         "name": "reminder_cancel",
-        "description": "Отменяет напоминание по номеру из списка.",
+        "description": "Отменяет напоминание. Можно указать index (номер из reminder_list, начиная с 1) ИЛИ text (часть текста напоминания для поиска). Если пользователь говорит 'убери предыдущее' или называет текст — используй text. Если есть сомнения — сначала вызови reminder_list.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"}
-            },
-            "required": ["index"]
+                "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"},
+                "text": {"type": "string", "description": "Часть текста напоминания для поиска (если не знаешь индекс)"}
+            }
         }
     },
     {
@@ -854,11 +854,25 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     if name == "reminder_cancel":
         try:
             reminders = get_reminders(user_id)
-            idx = tool_input["index"] - 1
             active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
-            if idx < 0 or idx >= len(active):
-                return "Напоминание не найдено."
-            real_idx, r = active[idx]
+            if not active:
+                return "Нет активных напоминаний."
+            real_idx, r = None, None
+            if "text" in tool_input and tool_input["text"]:
+                search = tool_input["text"].lower()
+                for i, rem in active:
+                    if search in rem["text"].lower():
+                        real_idx, r = i, rem
+                        break
+                if real_idx is None:
+                    return f"Напоминание с текстом '{tool_input['text']}' не найдено."
+            elif "index" in tool_input:
+                idx = tool_input["index"] - 1
+                if idx < 0 or idx >= len(active):
+                    return "Напоминание не найдено."
+                real_idx, r = active[idx]
+            else:
+                return "Укажи index или text для отмены."
             reminders[real_idx]["done"] = True
             save_reminders(user_id, reminders)
             return f"Напоминание отменено: {r['text']}"
