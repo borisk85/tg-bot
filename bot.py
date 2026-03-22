@@ -1525,6 +1525,11 @@ async def send_weekly_ai_digest(context):
         for i in range(0, len(digest_text), 4096):
             await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096])
 
+        # Сохраняем в историю — чтобы бот помнил что отправлял дайджест
+        history = get_history(user_id)
+        history.append({"role": "assistant", "content": f"[Автоматический конкурентный дайджест]\n{digest_text}"})
+        set_history(user_id, history)
+
     except Exception as e:
         logger.error(f"Weekly digest error: {e}", exc_info=True)
         await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка недельного дайджеста: {e}")
@@ -1622,7 +1627,14 @@ async def send_morning_digest(context):
         except:
             pass
 
-        await context.bot.send_message(chat_id=user_id, text="\n".join(lines))
+        morning_text = "\n".join(lines)
+        await context.bot.send_message(chat_id=user_id, text=morning_text)
+
+        # Сохраняем в историю — чтобы бот помнил что отправлял утренний дайджест
+        history = get_history(user_id)
+        history.append({"role": "assistant", "content": f"[Автоматический утренний дайджест]\n{morning_text}"})
+        set_history(user_id, history)
+
     except Exception as e:
         logger.error(f"Дайджест ошибка: {e}")
 
