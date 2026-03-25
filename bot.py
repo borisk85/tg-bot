@@ -13,6 +13,8 @@ from anthropic import Anthropic
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
+import re
+import threading
 import requests
 import redis
 from google.oauth2.credentials import Credentials
@@ -101,6 +103,81 @@ def serialize_messages(messages: list) -> list:
             result.append(msg)
     return result
 
+# ── Telegram scraper (Telethon) ───────────────────────────────────────────────
+
+def _run_async_in_thread(coro):
+    """Запускает async-корутину из синхронного кода через отдельный поток."""
+    result_box = [None]
+    exc_box = [None]
+    def run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result_box[0] = loop.run_until_complete(coro)
+        except Exception as e:
+            exc_box[0] = e
+        finally:
+            loop.close()
+    t = threading.Thread(target=run)
+    t.start()
+    t.join(timeout=60)
+    if exc_box[0]:
+        raise exc_box[0]
+    return result_box[0]
+
+async def _fetch_tg_post(url: str) -> str:
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+
+    match = re.match(r'https?://t\.me/([^/]+)/(\d+)', url.strip())
+    if not match:
+        return "Неверная ссылка. Ожидается формат: https://t.me/channelname/123"
+
+    channel = match.group(1)
+    post_id = int(match.group(2))
+
+    api_id = os.getenv("TELEGRAM_API_ID")
+    api_hash = os.getenv("TELEGRAM_API_HASH")
+    session_str = os.getenv("TELETHON_SESSION", "")
+
+    if not api_id or not api_hash:
+        return "Ошибка: TELEGRAM_API_ID или TELEGRAM_API_HASH не настроены в переменных окружения"
+
+    client = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+    try:
+        await client.connect()
+
+        messages = await client.get_messages(channel, ids=post_id)
+        post = messages if not isinstance(messages, list) else (messages[0] if messages else None)
+        if not post:
+            return "Пост не найден или канал недоступен"
+
+        post_text = post.text or post.caption or "[медиа без текста]"
+
+        comments = []
+        async for msg in client.iter_messages(channel, reply_to=post_id, limit=500):
+            text = msg.text or msg.caption
+            if not text:
+                continue
+            sender_name = "Аноним"
+            if msg.sender:
+                if hasattr(msg.sender, 'first_name'):
+                    parts = [msg.sender.first_name or "", msg.sender.last_name or ""]
+                    sender_name = " ".join(p for p in parts if p) or "Аноним"
+                elif hasattr(msg.sender, 'title'):
+                    sender_name = msg.sender.title or "Канал"
+            comments.append(f"{sender_name}: {text}")
+
+        result = f"ПОСТ (@{channel}/{post_id}):\n{post_text}\n\n"
+        if comments:
+            result += f"КОММЕНТАРИИ ({len(comments)} шт.):\n" + "\n---\n".join(comments)
+        else:
+            result += "Комментариев нет или комментирование закрыто."
+
+        return result
+    finally:
+        await client.disconnect()
+
 # ── Google Calendar client ────────────────────────────────────────────────────
 
 def get_google_creds():
@@ -161,6 +238,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Контакты пользователя:
 - Жена: Дана, dana.aristanbayeva@gmail.com
+
+Правило: если пользователь присылает ссылку вида https://t.me/channel/123 и просит проанализировать, прочитать, summarize — используй telegram_analyze_post. После получения данных дай структурированный анализ: краткое содержание поста, основные темы обсуждения в комментариях, ключевые мнения и выводы.
 
 Команды бота:
 /clear — очистить историю
@@ -511,6 +590,17 @@ TOOLS = [
                 "date": {"type": "string", "description": "Дата события YYYY-MM-DD"}
             },
             "required": ["title"]
+        }
+    },
+    {
+        "name": "telegram_analyze_post",
+        "description": "Читает пост и все комментарии из Telegram-канала или группы по ссылке. Используй когда пользователь присылает ссылку на пост в Telegram и просит проанализировать, summarize, узнать о чём обсуждают.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Ссылка на пост в формате https://t.me/channelname/123"}
+            },
+            "required": ["url"]
         }
     }
 ]
@@ -1278,6 +1368,14 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
+    if name == "telegram_analyze_post":
+        try:
+            url = tool_input["url"]
+            raw = _run_async_in_thread(_fetch_tg_post(url))
+            return raw
+        except Exception as e:
+            return f"Ошибка: {e}"
+
     return f"[Инструмент '{name}' не найден]"
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
@@ -1725,7 +1823,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Генерация изображений — по текстовому описанию (FLUX)\n"
         "PDF / Word — прочитает и ответит на вопросы\n\n"
         "Утренний дайджест в 11:00 — погода + события + задачи\n"
-        "/ai_agents_digest — конкурентный радар по ИИ-ботам (запустить вручную)"
+        "/ai_agents_digest — конкурентный радар по ИИ-ботам (запустить вручную)\n\n"
+        "Telegram:\n"
+        "анализ поста + комментариев по ссылке — скинь https://t.me/channel/123"
     )
 
 async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context, folder_id: str = None):
