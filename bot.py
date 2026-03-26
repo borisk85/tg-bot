@@ -75,6 +75,30 @@ def save_reminders(user_id: int, reminders: list):
     if redis_client:
         redis_client.set(f"reminders:{user_id}", json.dumps(reminders, ensure_ascii=False))
 
+CITY_TZ = {
+    "москва": "Europe/Moscow", "питер": "Europe/Moscow", "санкт-петербург": "Europe/Moscow",
+    "алматы": "Asia/Almaty", "астана": "Asia/Almaty", "нур-султан": "Asia/Almaty",
+    "ташкент": "Asia/Tashkent", "бишкек": "Asia/Bishkek",
+    "лондон": "Europe/London", "берлин": "Europe/Berlin", "париж": "Europe/Paris",
+    "дубай": "Asia/Dubai", "стамбул": "Europe/Istanbul",
+    "нью-йорк": "America/New_York", "лос-анджелес": "America/Los_Angeles",
+    "токио": "Asia/Tokyo", "пекин": "Asia/Shanghai",
+}
+
+def get_user_tz(user_id: int) -> pytz.BaseTzInfo:
+    if redis_client:
+        tz_name = redis_client.get(f"tz:{user_id}")
+        if tz_name:
+            try:
+                return pytz.timezone(tz_name)
+            except Exception:
+                pass
+    return TZ  # default: Almaty
+
+def set_user_tz(user_id: int, tz_name: str):
+    if redis_client:
+        redis_client.set(f"tz:{user_id}", tz_name)
+
 def serialize_messages(messages: list) -> list:
     """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
     result = []
@@ -214,7 +238,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 ВАЖНО: никогда не используй markdown: запрещены **, __, *, _, `, #, ~. Только plain text без какого-либо форматирования.
 Эмодзи — да, приветствуются. Добавляй их органично под контекст: погода, задачи, напоминания, хорошие новости, события. Не перебарщивай — 1-3 эмодзи на ответ, только если они уместны. Сухие технические ответы (ошибки, запросы данных) — без эмодзи.
 Текущая дата и время: {datetime}
-При создании событий используй временную зону Asia/Almaty (UTC+5) если не указано другое.
+При создании событий используй временную зону пользователя (указана в текущей дате/времени) если не указано другое.
 Когда показываешь события — форматируй красиво, с датой и временем.
 
 Правило: когда пользователь присылает фото с вопросом — отвечай строго по тому, что на фото. Не предлагай альтернативы, другие бренды или варианты которых нет на фото, если пользователь явно не просит "что ещё" или "альтернативы".
@@ -936,10 +960,10 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
     if name == "reminder_set":
         try:
-            import re
             text = tool_input["text"]
             dt_str = tool_input["datetime"]
-            now = now_local()
+            user_tz = get_user_tz(user_id)
+            now = datetime.now(user_tz)
 
             if dt_str.startswith("+"):
                 match = re.match(r'\+(\d+)([mhd])', dt_str)
@@ -951,7 +975,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 else:
                     return "Неверный формат времени. Используй +30m, +2h, +1d или YYYY-MM-DDTHH:MM"
             else:
-                remind_at = TZ.localize(datetime.fromisoformat(dt_str))
+                remind_at = user_tz.localize(datetime.fromisoformat(dt_str))
 
             reminders = get_reminders(user_id)
             reminders.append({"text": text, "at": remind_at.isoformat(), "done": False})
@@ -966,9 +990,10 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
             if not active:
                 return "Активных напоминаний нет."
+            user_tz = get_user_tz(user_id)
             lines = []
             for i, r in active:
-                dt = datetime.fromisoformat(r["at"]).strftime("%d.%m %H:%M")
+                dt = datetime.fromisoformat(r["at"]).astimezone(user_tz).strftime("%d.%m %H:%M")
                 lines.append(f"{i+1}. {dt} — {r['text']}")
             return "\n".join(lines)
         except Exception as e:
@@ -1480,10 +1505,11 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
                 break
 
     messages = list(history)
-    now = now_local()
+    user_tz = get_user_tz(user_id)
+    now = datetime.now(user_tz)
     days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
     system = SYSTEM_PROMPT.format(
-        datetime=f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')}"
+        datetime=f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')} ({user_tz.zone})"
     )
 
     for _ in range(10):
@@ -1870,6 +1896,31 @@ async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
 
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    args = " ".join(context.args).strip().lower() if context.args else ""
+    if not args:
+        current = get_user_tz(user_id).zone
+        await update.message.reply_text(
+            f"Текущий часовой пояс: {current}\n\n"
+            "Чтобы сменить:\n"
+            "/timezone Europe/Moscow\n"
+            "/timezone Asia/Almaty\n"
+            "/timezone America/New_York\n\n"
+            "Или название города: /timezone Москва"
+        )
+        return
+    tz_name = CITY_TZ.get(args, args)
+    try:
+        pytz.timezone(tz_name)
+        set_user_tz(user_id, tz_name)
+        await update.message.reply_text(f"Часовой пояс установлен: {tz_name} ✓")
+    except Exception:
+        await update.message.reply_text(
+            f"Неизвестный часовой пояс: {args}\n"
+            "Используй стандартные названия: Europe/Moscow, Asia/Almaty, America/New_York и т.д."
+        )
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Команды:\n"
@@ -1889,6 +1940,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "отправить файл/фото с подписью 'в drive' — загрузит в Drive\n\n"
         "Напоминания:\n"
         "поставить через N минут/часов или на время, список, отмена\n\n"
+        "Часовой пояс:\n"
+        "/timezone — показать текущий\n"
+        "/timezone Europe/Moscow — сменить (или название города)\n\n"
         "Погода — любой город, прогноз до 5 дней\n"
         "Валюты и крипта — BTC/SOL/ETH, USD/KZT и любые пары\n"
         "Токены — инфо по адресу контракта (Dexscreener)\n"
@@ -2098,6 +2152,7 @@ def main():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
+    app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     # Регистрируем команды в меню Telegram
@@ -2109,6 +2164,7 @@ def main():
             BotCommand("clear", "Очистить историю чата"),
             BotCommand("myid", "Мой Telegram ID"),
             BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
+            BotCommand("timezone", "Часовой пояс"),
         ])
     app.post_init = post_init
 
