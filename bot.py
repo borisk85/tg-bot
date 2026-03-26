@@ -76,13 +76,14 @@ def save_reminders(user_id: int, reminders: list):
         redis_client.set(f"reminders:{user_id}", json.dumps(reminders, ensure_ascii=False))
 
 CITY_TZ = {
-    "москва": "Europe/Moscow", "питер": "Europe/Moscow", "санкт-петербург": "Europe/Moscow",
-    "алматы": "Asia/Almaty", "астана": "Asia/Almaty", "нур-султан": "Asia/Almaty",
-    "ташкент": "Asia/Tashkent", "бишкек": "Asia/Bishkek",
-    "лондон": "Europe/London", "берлин": "Europe/Berlin", "париж": "Europe/Paris",
-    "дубай": "Asia/Dubai", "стамбул": "Europe/Istanbul",
-    "нью-йорк": "America/New_York", "лос-анджелес": "America/Los_Angeles",
-    "токио": "Asia/Tokyo", "пекин": "Asia/Shanghai",
+    "астана": "Asia/Almaty",
+    "ташкент": "Asia/Tashkent",
+    "нячанг": "Asia/Ho_Chi_Minh",
+    "хошимин": "Asia/Ho_Chi_Minh",
+    "дубай": "Asia/Dubai",
+    "анталья": "Europe/Istanbul",
+    "стамбул": "Europe/Istanbul",
+    "куала-лумпур": "Asia/Kuala_Lumpur",
 }
 
 def get_user_tz(user_id: int) -> pytz.BaseTzInfo:
