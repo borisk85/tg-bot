@@ -225,6 +225,11 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: город пользователя по умолчанию — Алматы. Если спрашивают "какая погода" без указания города — используй Алматы. Другой город только если явно указан в вопросе.
 
+Правило: Tasks — редактирование:
+- Если нужно добавить текст к существующей задаче/идее — используй tasks_update с append_notes
+- Если нужно удалить дубликат или ненужную задачу — используй tasks_delete
+- НЕ создавай новую задачу если просят обновить или дополнить существующую
+
 Правило: Calendar vs Tasks:
 - Google Calendar — только если есть конкретная дата И время (встречи, события, звонки)
 - Google Tasks, список «Задачи» — дела без времени, туду, напоминания, покупки
@@ -553,6 +558,33 @@ TOOLS = [
                 "notes": {"type": "string", "description": "Заметка / описание задачи (необязательно)"},
                 "due": {"type": "string", "description": "Срок выполнения в формате YYYY-MM-DD (необязательно)"},
                 "tasklist": {"type": "string", "description": "Название списка (по умолчанию основной)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "tasks_update",
+        "description": "Обновляет существующую задачу в Google Tasks: меняет название, заметку или дописывает текст к существующей заметке. Используй когда нужно добавить информацию к уже существующей задаче/идее.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название задачи для поиска (или часть названия)"},
+                "new_title": {"type": "string", "description": "Новое название задачи (необязательно)"},
+                "notes": {"type": "string", "description": "Новая заметка — полностью заменит существующую (необязательно)"},
+                "append_notes": {"type": "string", "description": "Текст для добавления в конец существующей заметки (необязательно)"},
+                "tasklist": {"type": "string", "description": "Название списка (необязательно, ищет во всех если не указан)"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "tasks_delete",
+        "description": "Удаляет задачу из Google Tasks по названию.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название задачи для удаления (или часть названия)"},
+                "tasklist": {"type": "string", "description": "Название списка (необязательно)"}
             },
             "required": ["title"]
         }
@@ -1255,6 +1287,49 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
+    if name == "tasks_update":
+        try:
+            service = get_tasks_service()
+            query = tool_input["title"].lower()
+            lists = service.tasklists().list().execute().get("items", [])
+            tasklist_name = tool_input.get("tasklist", "").lower()
+            for tl in lists:
+                if tasklist_name and tasklist_name not in tl["title"].lower():
+                    continue
+                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                for t in tasks:
+                    if query in t["title"].lower():
+                        if tool_input.get("new_title"):
+                            t["title"] = tool_input["new_title"]
+                        if tool_input.get("notes") is not None:
+                            t["notes"] = tool_input["notes"]
+                        if tool_input.get("append_notes"):
+                            existing = t.get("notes", "")
+                            t["notes"] = (existing + "\n\n" + tool_input["append_notes"]).strip()
+                        service.tasks().update(tasklist=tl["id"], task=t["id"], body=t).execute()
+                        return f"Обновлено: «{t['title']}»"
+            return f"Задача «{tool_input['title']}» не найдена."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_delete":
+        try:
+            service = get_tasks_service()
+            query = tool_input["title"].lower()
+            lists = service.tasklists().list().execute().get("items", [])
+            tasklist_name = tool_input.get("tasklist", "").lower()
+            for tl in lists:
+                if tasklist_name and tasklist_name not in tl["title"].lower():
+                    continue
+                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                for t in tasks:
+                    if query in t["title"].lower():
+                        service.tasks().delete(tasklist=tl["id"], task=t["id"]).execute()
+                        return f"Удалено: «{t['title']}»"
+            return f"Задача «{tool_input['title']}» не найдена."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
     if name == "web_search":
         try:
             query = tool_input["query"]
@@ -1806,7 +1881,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "найти, прочитать, отправить письмо\n"
         "удалить, очистить корзину и спам\n\n"
         "Google Tasks:\n"
-        "списки Задачи и Идеи — добавить, показать, выполнить\n\n"
+        "списки Задачи и Идеи — добавить, показать, выполнить, обновить, удалить\n\n"
         "Google Drive:\n"
         "поиск, чтение файлов\n"
         "создать doc / sheet / slides / папку\n"
