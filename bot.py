@@ -250,6 +250,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
+Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
 Правило: если спрашивают цену токена по названию (не по адресу контракта) — не пытайся угадать тикер и не ищи похожие акции или токены. Попроси адрес контракта.
@@ -552,6 +553,21 @@ TOOLS = [
                 }
             },
             "required": []
+        }
+    },
+    {
+        "name": "get_market_price",
+        "description": "Получает реальную цену акций, индексов, драгоценных металлов через Yahoo Finance. Используй для: золото (XAU/USD → тикер 'GC=F'), серебро ('SI=F'), нефть ('CL=F'), S&P500 ('^GSPC'), NASDAQ ('^IXIC'), Dow Jones ('^DJI'), Tesla ('TSLA'), Apple ('AAPL') и любых других тикеров. ВСЕГДА используй этот инструмент для акций, индексов и металлов — не используй web_search.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Список Yahoo Finance тикеров, например: ['GC=F', '^IXIC', 'TSLA']"
+                }
+            },
+            "required": ["tickers"]
         }
     },
     {
@@ -1167,6 +1183,26 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 if kzt:
                     lines.append(f"💱 USD/KZT: {kzt:,.0f} ₸")
 
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "get_market_price":
+        try:
+            import yfinance as yf
+            tickers = tool_input["tickers"]
+            lines = []
+            for ticker in tickers:
+                t = yf.Ticker(ticker)
+                info = t.fast_info
+                price = info.last_price
+                prev_close = info.previous_close
+                if price is None or prev_close is None:
+                    lines.append(f"❓ {ticker}: нет данных")
+                    continue
+                change_pct = (price - prev_close) / prev_close * 100
+                arrow = "📈" if change_pct >= 0 else "📉"
+                lines.append(f"{arrow} {ticker}: {price:,.2f} ({change_pct:+.1f}%)")
             return "\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"

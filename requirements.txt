@@ -11,3 +11,4 @@ python-docx>=1.0.0
 fal-client>=0.5.0
 youtube-transcript-api>=0.6.0
 telethon>=1.36.0
+yfinance>=0.2.0
