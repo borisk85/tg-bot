@@ -75,6 +75,43 @@ def save_reminders(user_id: int, reminders: list):
     if redis_client:
         redis_client.set(f"reminders:{user_id}", json.dumps(reminders, ensure_ascii=False))
 
+def get_price_alerts(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"price_alerts:{user_id}")
+        return json.loads(data) if data else []
+    return []
+
+def save_price_alerts(user_id: int, alerts: list):
+    if redis_client:
+        redis_client.set(f"price_alerts:{user_id}", json.dumps(alerts, ensure_ascii=False))
+
+# Маппинг тикеров крипты → CoinGecko ID
+CRYPTO_TICKERS = {
+    "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
+    "DOGE": "dogecoin", "BNB": "binancecoin", "XRP": "ripple",
+    "ADA": "cardano", "AVAX": "avalanche-2", "DOT": "polkadot",
+    "MATIC": "matic-network", "LINK": "chainlink", "UNI": "uniswap",
+}
+
+def fetch_asset_price(ticker: str) -> float | None:
+    """Единый прайс-чекер: крипта через CoinGecko, остальное через yfinance."""
+    try:
+        if ticker in CRYPTO_TICKERS:
+            coin_id = CRYPTO_TICKERS[ticker]
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": coin_id, "vs_currencies": "usd"},
+                headers={"Accept": "application/json"},
+                timeout=10
+            )
+            return resp.json().get(coin_id, {}).get("usd")
+        else:
+            import yfinance as yf
+            price = yf.Ticker(ticker).fast_info.last_price
+            return float(price) if price else None
+    except Exception:
+        return None
+
 CITY_TZ = {
     "астана": "Asia/Almaty",
     "ташкент": "Asia/Tashkent",
@@ -254,6 +291,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
+Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
 Правило: если спрашивают цену токена по названию (не по адресу контракта) — не пытайся угадать тикер и не ищи похожие акции или токены. Попроси адрес контракта.
@@ -527,6 +565,35 @@ TOOLS = [
             "properties": {
                 "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"},
                 "text": {"type": "string", "description": "Часть текста напоминания для поиска (если не знаешь индекс)"}
+            }
+        }
+    },
+    {
+        "name": "alert_price_set",
+        "description": "Устанавливает ценовой алерт: уведомит когда актив достигнет заданной цены. Используй для крипты (BTC, ETH, SOL, DOGE и др.), металлов (GC=F=золото, SI=F=серебро), индексов (^IXIC=NASDAQ, ^GSPC=S&P500) и акций (TSLA, AAPL и др.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "Тикер актива: BTC, ETH, SOL, GC=F, ^IXIC, TSLA и т.д."},
+                "target_price": {"type": "number", "description": "Целевая цена в USD"},
+                "direction": {"type": "string", "enum": ["above", "below"], "description": "above — уведомить когда цена поднимется до, below — когда упадет до"}
+            },
+            "required": ["ticker", "target_price", "direction"]
+        }
+    },
+    {
+        "name": "alert_price_list",
+        "description": "Показывает все активные ценовые алерты пользователя.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "alert_price_cancel",
+        "description": "Отменяет ценовой алерт по номеру из alert_price_list (начиная с 1) или по тикеру.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "Номер алерта из alert_price_list (начиная с 1)"},
+                "ticker": {"type": "string", "description": "Тикер актива — удалит все алерты по этому тикеру"}
             }
         }
     },
@@ -1103,6 +1170,54 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return f"Субтитры недоступны для этого видео. Название: {title or 'неизвестно'}. URL: {url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
+
+    if name == "alert_price_set":
+        try:
+            ticker = tool_input["ticker"].upper()
+            target = float(tool_input["target_price"])
+            direction = tool_input["direction"]
+            alerts = get_price_alerts(user_id)
+            alerts.append({
+                "ticker": ticker,
+                "target_price": target,
+                "direction": direction,
+                "created_at": now_local().isoformat()
+            })
+            save_price_alerts(user_id, alerts)
+            direction_text = "вырастет до" if direction == "above" else "упадет до"
+            return f"Алерт установлен: уведомлю когда {ticker} {direction_text} ${target:,.2f}"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "alert_price_list":
+        alerts = get_price_alerts(user_id)
+        if not alerts:
+            return "Нет активных ценовых алертов."
+        lines = []
+        for i, a in enumerate(alerts, 1):
+            direction_text = "вырастет до" if a["direction"] == "above" else "упадет до"
+            lines.append(f"{i}. {a['ticker']} {direction_text} ${a['target_price']:,.2f}")
+        return "\n".join(lines)
+
+    if name == "alert_price_cancel":
+        alerts = get_price_alerts(user_id)
+        if not alerts:
+            return "Нет активных алертов."
+        if "index" in tool_input:
+            idx = tool_input["index"] - 1
+            if idx < 0 or idx >= len(alerts):
+                return "Алерт не найден."
+            removed = alerts.pop(idx)
+            save_price_alerts(user_id, alerts)
+            return f"Алерт на {removed['ticker']} отменен."
+        elif "ticker" in tool_input:
+            ticker = tool_input["ticker"].upper()
+            new_alerts = [a for a in alerts if a["ticker"] != ticker]
+            if len(new_alerts) == len(alerts):
+                return f"Алертов на {ticker} не найдено."
+            save_price_alerts(user_id, new_alerts)
+            return f"Алерты на {ticker} отменены."
+        return "Укажи index или ticker."
 
     if name == "get_token_info":
         try:
@@ -1890,6 +2005,37 @@ async def send_morning_digest(context):
     except Exception as e:
         logger.error(f"Дайджест ошибка: {e}")
 
+async def check_price_alerts(context):
+    if not redis_client:
+        return
+    for key in redis_client.scan_iter("price_alerts:*"):
+        user_id = int(key.split(":")[1])
+        alerts = get_price_alerts(user_id)
+        if not alerts:
+            continue
+        remaining = []
+        fired = False
+        for a in alerts:
+            price = fetch_asset_price(a["ticker"])
+            if price is None:
+                remaining.append(a)
+                continue
+            triggered = (a["direction"] == "above" and price >= a["target_price"]) or \
+                        (a["direction"] == "below" and price <= a["target_price"])
+            if triggered:
+                direction_text = "достиг" if a["direction"] == "above" else "упал до"
+                msg = f"🔔 Алерт сработал! {a['ticker']} {direction_text} ${price:,.2f} (цель: ${a['target_price']:,.2f})"
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=msg)
+                    fired = True
+                except Exception as e:
+                    logger.error(f"Ошибка отправки алерта: {e}")
+                    remaining.append(a)
+            else:
+                remaining.append(a)
+        if len(remaining) != len(alerts):
+            save_price_alerts(user_id, remaining)
+
 async def check_reminders(context):
     if not redis_client:
         return
@@ -2182,6 +2328,7 @@ def main():
 
     app = Application.builder().token(token).build()
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
+    app.job_queue.run_repeating(check_price_alerts, interval=300, first=30)
     import datetime as dt
     app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
