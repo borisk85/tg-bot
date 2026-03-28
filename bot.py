@@ -85,6 +85,16 @@ def save_price_alerts(user_id: int, alerts: list):
     if redis_client:
         redis_client.set(f"price_alerts:{user_id}", json.dumps(alerts, ensure_ascii=False))
 
+def get_user_memory(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"memory:{user_id}")
+        return json.loads(data) if data else []
+    return []
+
+def save_user_memory(user_id: int, memories: list):
+    if redis_client:
+        redis_client.set(f"memory:{user_id}", json.dumps(memories, ensure_ascii=False))
+
 # Маппинг тикеров крипты → CoinGecko ID
 CRYPTO_TICKERS = {
     "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
@@ -299,6 +309,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: НИКОГДА не используй тройные бэктики (```) в ответах — Telegram их не рендерит, они отображаются как символы. Код, SVG, JSON и любые другие блоки кода — только через drive_create_doc или как файл, но не вставляй в текст сообщения.
 Правило: если пользователь просит создать SVG, HTML, код или любой текстовый файл — создай его через drive_create_doc и дай ссылку. Не вставляй содержимое файла в чат.
 Правило: generate_image НЕЛЬЗЯ использовать для логотипов, иконок, SVG-фигур и любых задач где важна точная форма или цвет существующей фигуры. Для таких задач — только SVG через drive_create_doc. generate_image — исключительно для новых фото/арт изображений (люди, пейзажи, сцены).
+Правило: ДОЛГОСРОЧНАЯ ПАМЯТЬ — автоматически вызывай memory_save когда пользователь сообщает: адреса контрактов токенов, тикеры которые он отслеживает, личные предпочтения, города проживания, имена близких, важные числа (размер позиции, целевые цены). Не спрашивай разрешения — просто сохраняй фоном. Используй понятные ключи: contract_testicle, home_city, wife_name и т.д. При ответе опирайся на факты из памяти — не переспрашивай то что уже знаешь.
 
 Правило: Tasks — редактирование:
 - Если нужно добавить текст к существующей задаче/идее — используй tasks_update с append_notes
@@ -566,6 +577,34 @@ TOOLS = [
                 "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"},
                 "text": {"type": "string", "description": "Часть текста напоминания для поиска (если не знаешь индекс)"}
             }
+        }
+    },
+    {
+        "name": "memory_save",
+        "description": "Сохраняет важный факт о пользователе в долгосрочную память (хранится навсегда). Используй когда пользователь сообщает: адреса контрактов, тикеры которые он следит, предпочтения, имена, города, важные числа, любые данные которые стоит помнить в следующих сессиях.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Короткое название факта, например: 'testicle_contract', 'home_city', 'btc_stack'"},
+                "value": {"type": "string", "description": "Значение факта"}
+            },
+            "required": ["key", "value"]
+        }
+    },
+    {
+        "name": "memory_list",
+        "description": "Показывает всё что сохранено в долгосрочной памяти о пользователе.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "memory_delete",
+        "description": "Удаляет факт из долгосрочной памяти по ключу.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Ключ факта для удаления"}
+            },
+            "required": ["key"]
         }
     },
     {
@@ -1171,6 +1210,40 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
+    if name == "memory_save":
+        try:
+            key = tool_input["key"].strip().lower().replace(" ", "_")
+            value = tool_input["value"].strip()
+            memories = get_user_memory(user_id)
+            # Обновляем если ключ уже есть
+            for m in memories:
+                if m["key"] == key:
+                    m["value"] = value
+                    m["updated_at"] = now_local().isoformat()
+                    save_user_memory(user_id, memories)
+                    return f"Обновил в памяти: {key} = {value}"
+            memories.append({"key": key, "value": value, "saved_at": now_local().isoformat()})
+            save_user_memory(user_id, memories)
+            return f"Запомнил: {key} = {value}"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "memory_list":
+        memories = get_user_memory(user_id)
+        if not memories:
+            return "Долгосрочная память пуста."
+        lines = [f"• {m['key']}: {m['value']}" for m in memories]
+        return "Что я о тебе знаю:\n" + "\n".join(lines)
+
+    if name == "memory_delete":
+        key = tool_input["key"].strip().lower().replace(" ", "_")
+        memories = get_user_memory(user_id)
+        new_memories = [m for m in memories if m["key"] != key]
+        if len(new_memories) == len(memories):
+            return f"Ключ '{key}' не найден в памяти."
+        save_user_memory(user_id, new_memories)
+        return f"Удалил из памяти: {key}"
+
     if name == "alert_price_set":
         try:
             ticker = tool_input["ticker"].upper()
@@ -1644,8 +1717,8 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         user_content = user_text
     history.append({"role": "user", "content": user_content})
 
-    if len(history) > 15:
-        history = history[-15:]
+    if len(history) > 30:
+        history = history[-30:]
         # Убираем осиротевшие tool_result в начале истории:
         # если первое сообщение — user с tool_result блоками без предшествующего tool_use
         while history and history[0]["role"] == "user":
@@ -1664,6 +1737,11 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
     system = SYSTEM_PROMPT.format(
         datetime=f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')} ({user_tz.zone})"
     )
+    # Добавляем долгосрочную память в системный промпт
+    memories = get_user_memory(user_id)
+    if memories:
+        memory_lines = "\n".join(f"• {m['key']}: {m['value']}" for m in memories)
+        system += f"\n\nДолгосрочная память о пользователе (факты из прошлых сессий):\n{memory_lines}"
 
     for _ in range(10):
         response = anthropic.messages.create(
