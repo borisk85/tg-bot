@@ -1968,7 +1968,7 @@ async def send_weekly_ai_digest(context):
         digest_text = response.content[0].text
 
         for i in range(0, len(digest_text), 4096):
-            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096])
+            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
 
         # Сохраняем в историю — чтобы бот помнил что отправлял дайджест
         history = get_history(user_id)
@@ -2073,7 +2073,7 @@ async def send_morning_digest(context):
             pass
 
         morning_text = "\n".join(lines)
-        await context.bot.send_message(chat_id=user_id, text=morning_text)
+        await context.bot.send_message(chat_id=user_id, text=morning_text, disable_web_page_preview=True)
 
         # Сохраняем в историю — чтобы бот помнил что отправлял утренний дайджест
         history = get_history(user_id)
