@@ -835,19 +835,41 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
     if name == "gmail_read":
         try:
-            import base64
+            import base64, re as _re
             service = get_gmail_service()
             msg = service.users().messages().get(userId="me", id=tool_input["message_id"], format="full").execute()
             headers = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
-            body = ""
-            if "parts" in msg["payload"]:
-                for part in msg["payload"]["parts"]:
-                    if part["mimeType"] == "text/plain" and "data" in part.get("body", {}):
-                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="ignore")
-                        break
-            elif "data" in msg["payload"].get("body", {}):
-                body = base64.urlsafe_b64decode(msg["payload"]["body"]["data"]).decode("utf-8", errors="ignore")
-            return f"От: {headers.get('From','?')}\nКому: {headers.get('To','?')}\nТема: {headers.get('Subject','?')}\nДата: {headers.get('Date','?')}\n\n{body[:3000]}"
+
+            def extract_parts(payload):
+                """Рекурсивно собирает (plain_text, html_text) из любой вложенности."""
+                plain, html = "", ""
+                if "parts" in payload:
+                    for part in payload["parts"]:
+                        p, h = extract_parts(part)
+                        plain = plain or p
+                        html = html or h
+                else:
+                    data = payload.get("body", {}).get("data", "")
+                    if data:
+                        text = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                        if payload.get("mimeType") == "text/plain":
+                            plain = text
+                        elif payload.get("mimeType") == "text/html":
+                            html = text
+                return plain, html
+
+            plain, html = extract_parts(msg["payload"])
+            if plain:
+                body = plain
+            elif html:
+                # Снимаем HTML-теги, оставляем читаемый текст
+                body = _re.sub(r'<[^>]+>', ' ', html)
+                body = _re.sub(r'[ \t]+', ' ', body)
+                body = _re.sub(r'\n{3,}', '\n\n', body).strip()
+            else:
+                body = "(текст письма не удалось извлечь)"
+
+            return f"От: {headers.get('From','?')}\nКому: {headers.get('To','?')}\nТема: {headers.get('Subject','?')}\nДата: {headers.get('Date','?')}\n\n{body[:4000]}"
         except Exception as e:
             return f"Ошибка: {e}"
 
