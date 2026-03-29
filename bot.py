@@ -862,8 +862,15 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             if plain:
                 body = plain
             elif html:
-                # Снимаем HTML-теги, оставляем читаемый текст
-                body = _re.sub(r'<[^>]+>', ' ', html)
+                # Убираем style/script блоки целиком вместе с содержимым
+                body = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL | _re.IGNORECASE)
+                body = _re.sub(r'<script[^>]*>.*?</script>', '', body, flags=_re.DOTALL | _re.IGNORECASE)
+                # Заменяем <br>, <p>, <tr>, <li> на переносы для читаемости
+                body = _re.sub(r'<(br|p|tr|li)[^>]*>', '\n', body, flags=_re.IGNORECASE)
+                # Снимаем оставшиеся теги
+                body = _re.sub(r'<[^>]+>', '', body)
+                # Декодируем HTML entities
+                body = body.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
                 body = _re.sub(r'[ \t]+', ' ', body)
                 body = _re.sub(r'\n{3,}', '\n\n', body).strip()
             else:
