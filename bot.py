@@ -978,30 +978,63 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         try:
             import re as _re, base64
             from email.mime.text import MIMEText
+
+            def extract_body_parts(payload):
+                plain, html = "", ""
+                if "parts" in payload:
+                    for part in payload["parts"]:
+                        p, h = extract_body_parts(part)
+                        plain = plain or p
+                        html = html or h
+                else:
+                    data = payload.get("body", {}).get("data", "")
+                    if data:
+                        text = base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+                        if payload.get("mimeType") == "text/plain":
+                            plain = text
+                        elif payload.get("mimeType") == "text/html":
+                            html = text
+                return plain, html
+
             service = get_gmail_service()
-            msg = service.users().messages().get(userId="me", id=tool_input["message_id"], format="metadata",
-                metadataHeaders=["List-Unsubscribe", "List-Unsubscribe-Post", "From", "Subject"]).execute()
+            msg = service.users().messages().get(userId="me", id=tool_input["message_id"], format="full").execute()
             hdrs = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
             unsub = hdrs.get("List-Unsubscribe", "")
             subject = hdrs.get("Subject", "")
             sender = hdrs.get("From", "")
-            if not unsub:
-                return f"Письмо от {sender} не содержит заголовка List-Unsubscribe — отписка через заголовок невозможна. Попробуй найти ссылку «Unsubscribe» в тексте письма вручную."
-            # Извлекаем все ссылки из заголовка: <https://...> и <mailto:...>
-            urls = _re.findall(r'<([^>]+)>', unsub)
+
+            # Шаг 1: заголовок List-Unsubscribe
+            urls = _re.findall(r'<([^>]+)>', unsub) if unsub else []
             http_url = next((u for u in urls if u.startswith("http")), None)
             mailto = next((u for u in urls if u.startswith("mailto:")), None)
+
+            # Шаг 2: если заголовка нет — ищем ссылку в теле письма
+            if not http_url and not mailto:
+                _, html_body = extract_body_parts(msg["payload"])
+                plain_body = msg.get("snippet", "")
+                # Ищем href рядом со словом unsubscribe/отписаться
+                body_urls = _re.findall(
+                    r'href=["\']([^"\']+)["\'][^>]*>[^<]*(?:unsubscribe|отписаться|opt.?out)[^<]*<',
+                    html_body, _re.IGNORECASE
+                )
+                if not body_urls:
+                    # Обратный порядок: текст ссылки → href
+                    body_urls = _re.findall(
+                        r'href=["\']([^"\']{20,}unsubscri[^"\']*)["\']',
+                        html_body, _re.IGNORECASE
+                    )
+                if body_urls:
+                    http_url = body_urls[0]
+
             if http_url:
                 resp = requests.get(http_url, timeout=15, allow_redirects=True,
                     headers={"User-Agent": "Mozilla/5.0"})
-                # Некоторые рассылки требуют POST
                 if resp.status_code >= 400:
                     post_data = hdrs.get("List-Unsubscribe-Post", "List-Unsubscribe=One-Click")
                     resp = requests.post(http_url, data=post_data, timeout=15,
                         headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded"})
                 return f"Отписка выполнена (HTTP {resp.status_code}). Рассылка: {subject} от {sender}."
             elif mailto:
-                # mailto:unsubscribe@example.com?subject=unsubscribe
                 addr = mailto.replace("mailto:", "").split("?")[0]
                 subj_match = _re.search(r'subject=([^&]+)', mailto)
                 mail_subj = subj_match.group(1) if subj_match else "Unsubscribe"
@@ -1012,7 +1045,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 service.users().messages().send(userId="me", body={"raw": raw}).execute()
                 return f"Письмо-запрос на отписку отправлено на {addr}. Рассылка: {subject} от {sender}."
             else:
-                return f"Не удалось распознать ссылку для отписки в заголовке: {unsub}"
+                return f"Ссылка для отписки не найдена ни в заголовках, ни в теле письма. Рассылка: {subject} от {sender}. Придется открыть письмо вручную."
         except Exception as e:
             return f"Ошибка: {e}"
 
