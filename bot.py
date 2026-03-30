@@ -459,6 +459,17 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {
+        "name": "gmail_mark_spam",
+        "description": "Помечает письмо как спам и перемещает его в папку Спам. Используй когда пользователь хочет пометить письмо как спам.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "ID письма"}
+            },
+            "required": ["message_id"]
+        }
+    },
+    {
         "name": "web_search",
         "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
         "input_schema": {
@@ -937,6 +948,18 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             service = get_gmail_service()
             service.users().messages().trash(userId="me", id=tool_input["message_id"]).execute()
             return "Письмо перемещено в корзину."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_mark_spam":
+        try:
+            service = get_gmail_service()
+            service.users().messages().modify(
+                userId="me",
+                id=tool_input["message_id"],
+                body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}
+            ).execute()
+            return "Письмо помечено как спам и перемещено в папку Спам."
         except Exception as e:
             return f"Ошибка: {e}"
 
