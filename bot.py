@@ -470,6 +470,17 @@ TOOLS = [
         }
     },
     {
+        "name": "gmail_unsubscribe",
+        "description": "Отписывается от рассылки по ID письма. Извлекает заголовок List-Unsubscribe и выполняет отписку: HTTP-запрос если ссылка, или отправляет письмо если mailto. Используй когда пользователь хочет отписаться от рассылки.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "ID письма рассылки"}
+            },
+            "required": ["message_id"]
+        }
+    },
+    {
         "name": "web_search",
         "description": "Поиск в интернете через Brave Search. Используй когда нужна актуальная информация, новости, факты, цены, погода и т.п.",
         "input_schema": {
@@ -960,6 +971,48 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}
             ).execute()
             return "Письмо помечено как спам и перемещено в папку Спам."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "gmail_unsubscribe":
+        try:
+            import re as _re, base64
+            from email.mime.text import MIMEText
+            service = get_gmail_service()
+            msg = service.users().messages().get(userId="me", id=tool_input["message_id"], format="metadata",
+                metadataHeaders=["List-Unsubscribe", "List-Unsubscribe-Post", "From", "Subject"]).execute()
+            hdrs = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
+            unsub = hdrs.get("List-Unsubscribe", "")
+            subject = hdrs.get("Subject", "")
+            sender = hdrs.get("From", "")
+            if not unsub:
+                return f"Письмо от {sender} не содержит заголовка List-Unsubscribe — отписка через заголовок невозможна. Попробуй найти ссылку «Unsubscribe» в тексте письма вручную."
+            # Извлекаем все ссылки из заголовка: <https://...> и <mailto:...>
+            urls = _re.findall(r'<([^>]+)>', unsub)
+            http_url = next((u for u in urls if u.startswith("http")), None)
+            mailto = next((u for u in urls if u.startswith("mailto:")), None)
+            if http_url:
+                resp = requests.get(http_url, timeout=15, allow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0"})
+                # Некоторые рассылки требуют POST
+                if resp.status_code >= 400:
+                    post_data = hdrs.get("List-Unsubscribe-Post", "List-Unsubscribe=One-Click")
+                    resp = requests.post(http_url, data=post_data, timeout=15,
+                        headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded"})
+                return f"Отписка выполнена (HTTP {resp.status_code}). Рассылка: {subject} от {sender}."
+            elif mailto:
+                # mailto:unsubscribe@example.com?subject=unsubscribe
+                addr = mailto.replace("mailto:", "").split("?")[0]
+                subj_match = _re.search(r'subject=([^&]+)', mailto)
+                mail_subj = subj_match.group(1) if subj_match else "Unsubscribe"
+                mail_msg = MIMEText("", "plain", "utf-8")
+                mail_msg["To"] = addr
+                mail_msg["Subject"] = mail_subj
+                raw = base64.urlsafe_b64encode(mail_msg.as_bytes()).decode()
+                service.users().messages().send(userId="me", body={"raw": raw}).execute()
+                return f"Письмо-запрос на отписку отправлено на {addr}. Рассылка: {subject} от {sender}."
+            else:
+                return f"Не удалось распознать ссылку для отписки в заголовке: {unsub}"
         except Exception as e:
             return f"Ошибка: {e}"
 
