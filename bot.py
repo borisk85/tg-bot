@@ -299,7 +299,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
-Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и любые другие монеты по тикеру или названию — ТОЛЬКО get_crypto_prices. get_token_info (DexScreener) — ТОЛЬКО когда дан адрес контракта (длинная строка вроде "7xKX..."), НИКОГДА для тикеров типа BTC/ETH/SOL.
+Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и любые другие монеты по тикеру или названию — ТОЛЬКО get_crypto_prices. get_token_info (DexScreener) — ТОЛЬКО когда дан адрес контракта (длинная строка букв и цифр, 32-44 символа). НИКОГДА не уточняй "чей это адрес" — просто вызови get_token_info, он сам вернёт название и тикер токена. НИКОГДА для тикеров типа BTC/ETH/SOL.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
@@ -1447,8 +1447,11 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
     if name == "get_token_info":
         try:
-            address = tool_input["address"]
-            resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{address}")
+            address = tool_input["address"].strip()
+            # pump.fun адреса иногда приходят с суффиксом "pump" — убираем
+            if address.endswith("pump") and len(address) > 44:
+                address = address[:-4]
+            resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{address}", timeout=10)
             data = resp.json()
             pairs = data.get("pairs", [])
             if not pairs:
