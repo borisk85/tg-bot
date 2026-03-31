@@ -2722,7 +2722,7 @@ def main():
             BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
             BotCommand("timezone", "Часовой пояс"),
             BotCommand("memory", "Что бот знает обо мне"),
-            BotCommand("about", "Рассказать о себе — запомню навсегда"),
+            BotCommand("about", "Рассказать о себе"),
         ])
     app.post_init = post_init
 
