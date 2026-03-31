@@ -323,6 +323,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 - Работа и проекты: чем занимается, что строит → work_role, project_X
 Примеры: пользователь присылает фото добавки и спрашивает "что с ней за 11 месяцев" → memory_save(health_supplements, "использует добавки с женьшенем/пантами, интересуется биохакингом"). Пользователь обсуждает крипту → memory_save(interest_crypto, "активный крипто-инвестор, следит за ценами"). "Купил Tesla" → memory_save(portfolio_stocks, "держит Tesla").
 Не спрашивай разрешения. Сохраняй молча и продолжай ответ. При ответе всегда проверяй память — не переспрашивай то что уже знаешь.
+Правило: если инструмент вернул текст начинающийся с "search_token crash:", "DEBUG ", "Ошибка" или "Error" — передай этот текст пользователю ДОСЛОВНО, без пересказа и интерпретации.
 
 Правило: КОДЫ ИЗ ПИСЕМ — когда пользователь просит "код из письма", "цифры из письма", "код подтверждения", "OTP", "verification code" и не указывает конкретного отправителя — немедленно вызови gmail_search с запросом "in:inbox" (или "verification OR code OR код OR подтверждение", maxResults=1), потом gmail_read на первое найденное письмо, выдай код. Не переспрашивай "от кого письмо?" — просто читай последнее входящее.
 
@@ -1495,7 +1496,9 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return result
         except Exception as e:
             import traceback
-            return f"Ошибка DexScreener: {e}\n{traceback.format_exc()[-300:]}"
+            tb = traceback.format_exc()
+            print(f"[search_token ERROR] query={tool_input} err={e}\n{tb}", flush=True)
+            return f"search_token crash: {e} | {tb[-400:]}"
 
     if name == "get_crypto_prices":
         try:
