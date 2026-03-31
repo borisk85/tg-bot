@@ -1492,7 +1492,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     result += f"\n⚠️ Несколько токенов с тикером {symbol} — показан с наибольшей ликвидностью. Для точного поиска укажи адрес контракта."
             return result
         except Exception as e:
-            return f"Ошибка DexScreener: {e}"
+            import traceback
+            return f"Ошибка DexScreener: {e}\n{traceback.format_exc()[-300:]}"
 
     if name == "get_crypto_prices":
         try:
