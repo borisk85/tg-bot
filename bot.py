@@ -299,7 +299,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
-Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search.
+Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и любые другие монеты по тикеру или названию — ТОЛЬКО get_crypto_prices. get_token_info (DexScreener) — ТОЛЬКО когда дан адрес контракта (длинная строка вроде "7xKX..."), НИКОГДА для тикеров типа BTC/ETH/SOL.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
@@ -693,7 +693,7 @@ TOOLS = [
                 "coins": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Список криптовалют (CoinGecko ID): bitcoin, solana, ethereum и др. Оставь пустым если нужны только фиатные валюты."
+                    "description": "Список криптовалют — тикеры (BTC, ETH, SOL, BNB, XRP, DOGE...) или CoinGecko ID (bitcoin, ethereum...). Оставь пустым если нужны только фиатные валюты."
                 },
                 "currencies": {
                     "type": "array",
@@ -1471,23 +1471,34 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             # Крипта → USD
             if coins:
-                ids = ",".join(coins)
+                # Нормализуем: тикер BTC → CoinGecko ID bitcoin
+                ticker_to_display = {}
+                normalized = []
+                for c in coins:
+                    c_upper = c.upper()
+                    if c_upper in CRYPTO_TICKERS:
+                        cg_id = CRYPTO_TICKERS[c_upper]
+                        ticker_to_display[cg_id] = c_upper
+                        normalized.append(cg_id)
+                    else:
+                        ticker_to_display[c.lower()] = c.upper()
+                        normalized.append(c.lower())
+                ids = ",".join(normalized)
                 resp = requests.get(
                     "https://api.coingecko.com/api/v3/simple/price",
                     params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
                     headers={"Accept": "application/json"}
                 )
                 data = resp.json()
-                names = {"bitcoin": "BTC", "solana": "SOL", "ethereum": "ETH", "tether": "USDT"}
-                for coin in coins:
-                    if coin in data:
-                        price = data[coin]["usd"]
-                        change = data[coin].get("usd_24h_change", 0)
+                for cg_id in normalized:
+                    if cg_id in data:
+                        price = data[cg_id]["usd"]
+                        change = data[cg_id].get("usd_24h_change", 0)
                         arrow = "📈" if change >= 0 else "📉"
-                        symbol = names.get(coin, coin.upper())
+                        symbol = ticker_to_display.get(cg_id, cg_id.upper())
                         lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
                     else:
-                        lines.append(f"❓ {coin}: не найдено")
+                        lines.append(f"❓ {ticker_to_display.get(cg_id, cg_id)}: не найдено")
 
             # Фиатные пары: FROM/TO
             if currencies:
