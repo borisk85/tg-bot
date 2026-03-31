@@ -2434,6 +2434,30 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text("История очищена.")
 
+async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    args = " ".join(context.args) if context.args else ""
+    if not args:
+        await update.message.reply_text(
+            "Расскажи о себе — запомню навсегда.\n\n"
+            "Пиши в свободной форме, например:\n"
+            "Меня зовут Борис, 38 лет, живу в Алматы, строю SaaS для Telegram-ботов, слежу за BTC и ETH, занимаюсь биохакингом\n\n"
+            "Используй: /about [текст о себе]"
+        )
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    injected = (
+        f"Запомни о пользователе следующее — разбей на отдельные факты и сохрани каждый через memory_save. "
+        f"После сохранения перечисли что именно запомнил.\n\n{args}"
+    )
+    try:
+        reply = await run_agent(user_id, injected)
+        for i in range(0, len(reply), 4096):
+            await update.message.reply_text(reply[i:i + 4096])
+    except Exception as e:
+        logger.error(f"cmd_about error: {e}", exc_info=True)
+        await update.message.reply_text("Ошибка при сохранении. Попробуй ещё раз.")
+
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     memories = get_user_memory(user_id)
@@ -2684,6 +2708,7 @@ def main():
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
+    app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     # Регистрируем команды в меню Telegram
@@ -2697,6 +2722,7 @@ def main():
             BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
             BotCommand("timezone", "Часовой пояс"),
             BotCommand("memory", "Что бот знает обо мне"),
+            BotCommand("about", "Рассказать о себе — запомню навсегда"),
         ])
     app.post_init = post_init
 
