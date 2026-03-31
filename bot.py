@@ -1317,7 +1317,6 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
     if name == "youtube_summary":
         try:
-            import re
             url = tool_input["url"]
             match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", url)
             if not match:
