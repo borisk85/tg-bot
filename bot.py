@@ -299,7 +299,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
-Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и другие основные монеты по тикеру — ТОЛЬКО get_crypto_prices. search_token (DexScreener) — для редких/неизвестных токенов: принимает название, тикер или адрес контракта. НИКОГДА не уточняй "чей это адрес" — просто вызови search_token, он сам найдет. НИКОГДА не используй search_token для BTC/ETH/SOL/BNB/XRP/DOGE и других монет из get_crypto_prices.
+Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и другие основные монеты по тикеру — ТОЛЬКО get_crypto_prices. search_token (DexScreener) — для редких/неизвестных токенов: принимает название, тикер или адрес контракта (строка 32-48 символов, может заканчиваться на "pump"). НИКОГДА не жди все адреса сразу — получил один адрес, сразу вызывай search_token. НИКОГДА не уточняй "чей это адрес" — инструмент сам вернёт название токена. НИКОГДА не используй search_token для BTC/ETH/SOL/BNB/XRP/DOGE и других монет из get_crypto_prices.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
@@ -1448,12 +1448,9 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     if name in ("get_token_info", "search_token"):
         try:
             query = (tool_input.get("query") or tool_input.get("address", "")).strip()
-            # pump.fun адреса иногда приходят с суффиксом "pump" — убираем
-            if query.endswith("pump") and len(query) > 44:
-                query = query[:-4]
             is_contract = bool(
                 re.match(r"^0x[0-9a-fA-F]{40}$", query) or
-                re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", query)
+                re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,48}$", query)  # 32-48: Solana адреса включая pump.fun суффикс
             )
             if is_contract:
                 resp = requests.get(
