@@ -674,14 +674,14 @@ TOOLS = [
         }
     },
     {
-        "name": "get_token_info",
-        "description": "Получает информацию о токене по адресу контракта (Solana, ETH, BSC и др.) через Dexscreener. Используй когда дают адрес контракта.",
+        "name": "search_token",
+        "description": "Ищет токен через DexScreener по названию, тикеру или адресу контракта. ВСЕГДА вызывай когда пользователь спрашивает цену токена которого нет в get_crypto_prices — независимо от того, дал он название, тикер или адрес. Никогда не проси пользователя уточнить тикер самостоятельно — сначала попробуй найти через этот инструмент.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "address": {"type": "string", "description": "Адрес контракта токена"}
+                "query": {"type": "string", "description": "Название токена, тикер (IRYNA, BONK, PEPE) или адрес контракта (0x... для EVM, 32-44 символа для Solana)"}
             },
-            "required": ["address"]
+            "required": ["query"]
         }
     },
     {
@@ -1471,34 +1471,75 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             # Крипта → USD
             if coins:
-                # Нормализуем: тикер BTC → CoinGecko ID bitcoin
-                ticker_to_display = {}
+                # Нормализуем входные данные: тикер BTC → CoinGecko ID bitcoin
+                ticker_to_display = {}  # cg_id → display тикер
                 normalized = []
+                tickers_upper = []  # параллельный список верхнего регистра для Binance
                 for c in coins:
                     c_upper = c.upper()
+                    tickers_upper.append(c_upper)
                     if c_upper in CRYPTO_TICKERS:
                         cg_id = CRYPTO_TICKERS[c_upper]
                         ticker_to_display[cg_id] = c_upper
                         normalized.append(cg_id)
                     else:
-                        ticker_to_display[c.lower()] = c.upper()
+                        ticker_to_display[c.lower()] = c_upper
                         normalized.append(c.lower())
-                ids = ",".join(normalized)
-                resp = requests.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
-                    headers={"Accept": "application/json"}
-                )
-                data = resp.json()
-                for cg_id in normalized:
-                    if cg_id in data:
-                        price = data[cg_id]["usd"]
-                        change = data[cg_id].get("usd_24h_change", 0)
-                        arrow = "📈" if change >= 0 else "📉"
-                        symbol = ticker_to_display.get(cg_id, cg_id.upper())
-                        lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
-                    else:
-                        lines.append(f"❓ {ticker_to_display.get(cg_id, cg_id)}: не найдено")
+
+                def fetch_via_coingecko():
+                    ids = ",".join(normalized)
+                    r = requests.get(
+                        "https://api.coingecko.com/api/v3/simple/price",
+                        params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+                        headers={"Accept": "application/json"},
+                        timeout=10
+                    )
+                    if r.status_code == 429:
+                        return None
+                    return r.json()
+
+                def fetch_via_binance(ticker_list):
+                    """Binance: публичный API без ключа, запрос по одному тикеру."""
+                    result = {}
+                    for t in ticker_list:
+                        symbol = f"{t}USDT"
+                        try:
+                            r24 = requests.get(
+                                "https://api.binance.com/api/v3/ticker/24hr",
+                                params={"symbol": symbol}, timeout=8
+                            )
+                            if r24.status_code == 200:
+                                d = r24.json()
+                                result[t] = {
+                                    "usd": float(d["lastPrice"]),
+                                    "usd_24h_change": float(d["priceChangePercent"])
+                                }
+                        except Exception:
+                            pass
+                    return result
+
+                cg_data = fetch_via_coingecko()
+                if cg_data is None:
+                    # CoinGecko rate-limited → Binance fallback
+                    binance_data = fetch_via_binance(tickers_upper)
+                    for t in tickers_upper:
+                        if t in binance_data:
+                            price = binance_data[t]["usd"]
+                            change = binance_data[t]["usd_24h_change"]
+                            arrow = "📈" if change >= 0 else "📉"
+                            lines.append(f"{arrow} {t}: ${price:,.2f} ({change:+.1f}%)")
+                        else:
+                            lines.append(f"❓ {t}: не найдено")
+                else:
+                    for cg_id in normalized:
+                        if cg_id in cg_data:
+                            price = cg_data[cg_id]["usd"]
+                            change = cg_data[cg_id].get("usd_24h_change", 0)
+                            arrow = "📈" if change >= 0 else "📉"
+                            symbol = ticker_to_display.get(cg_id, cg_id.upper())
+                            lines.append(f"{arrow} {symbol}: ${price:,.2f} ({change:+.1f}%)")
+                        else:
+                            lines.append(f"❓ {ticker_to_display.get(cg_id, cg_id)}: не найдено")
 
             # Фиатные пары: FROM/TO
             if currencies:
