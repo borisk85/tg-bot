@@ -1463,6 +1463,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     params={"q": query},
                     headers={"Accept": "application/json"}, timeout=10
                 )
+            if resp.status_code != 200:
+                return f"DEBUG DexScreener HTTP {resp.status_code}: {resp.text[:200]}"
             pairs = resp.json().get("pairs") or []
             if not pairs:
                 return f"Токен {query!r} не найден на DexScreener. Попроси пользователя уточнить адрес контракта."
