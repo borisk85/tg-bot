@@ -1336,6 +1336,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             from youtube_transcript_api import YouTubeTranscriptApi
             transcript = None
+            transcript_error = ""
             for langs in [["ru"], ["en"], None]:
                 try:
                     if langs:
@@ -1343,7 +1344,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     else:
                         transcript = YouTubeTranscriptApi.get_transcript(video_id)
                     break
-                except:
+                except Exception as te:
+                    transcript_error = str(te)
                     continue
 
             if transcript:
@@ -1370,7 +1372,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             except:
                 pass
 
-            return f"Субтитры недоступны для этого видео. Название: {title or 'неизвестно'}. URL: {url}"
+            return f"Субтитры недоступны (причина: {transcript_error}). Название: {title or 'неизвестно'}. URL: {url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
