@@ -1372,7 +1372,7 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             except:
                 pass
 
-            return f"Субтитры недоступны (причина: {transcript_error}). Название: {title or 'неизвестно'}. URL: {url}"
+            return f"Субтитры недоступны. Название: {title or 'неизвестно'}. URL: {url}"
         except Exception as e:
             return f"Не удалось получить транскрипт: {e}"
 
