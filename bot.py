@@ -299,12 +299,12 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
-Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и любые другие монеты по тикеру или названию — ТОЛЬКО get_crypto_prices. get_token_info (DexScreener) — ТОЛЬКО когда дан адрес контракта (длинная строка букв и цифр, 32-44 символа). НИКОГДА не уточняй "чей это адрес" — просто вызови get_token_info, он сам вернёт название и тикер токена. НИКОГДА для тикеров типа BTC/ETH/SOL.
+Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и другие основные монеты по тикеру — ТОЛЬКО get_crypto_prices. search_token (DexScreener) — для редких/неизвестных токенов: принимает название, тикер или адрес контракта. НИКОГДА не уточняй "чей это адрес" — просто вызови search_token, он сам найдет. НИКОГДА не используй search_token для BTC/ETH/SOL/BNB/XRP/DOGE и других монет из get_crypto_prices.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
-Правило: если спрашивают цену токена по названию (не по адресу контракта) — не пытайся угадать тикер и не ищи похожие акции или токены. Попроси адрес контракта.
+Правило: если спрашивают цену редкого/неизвестного токена по названию или тикеру (не из основного списка) — НЕМЕДЛЕННО вызови search_token с этим названием/тикером. Не проси пользователя уточнять — ищи сам. Только если search_token ничего не нашел — тогда попроси адрес контракта.
 Правило: город пользователя по умолчанию — Алматы. Если спрашивают "какая погода" без указания города — используй Алматы. Другой город только если явно указан в вопросе.
 Правило: НИКОГДА не используй тройные бэктики (```) в ответах — Telegram их не рендерит, они отображаются как символы. Код, SVG, JSON и любые другие блоки кода — только через drive_create_doc или как файл, но не вставляй в текст сообщения.
 Правило: если пользователь просит создать SVG, HTML, код или любой текстовый файл — создай его через drive_create_doc и дай ссылку. Не вставляй содержимое файла в чат.
@@ -1445,26 +1445,57 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return f"Алерты на {ticker} отменены."
         return "Укажи index или ticker."
 
-    if name == "get_token_info":
+    if name in ("get_token_info", "search_token"):
         try:
-            address = tool_input["address"].strip()
+            query = (tool_input.get("query") or tool_input.get("address", "")).strip()
             # pump.fun адреса иногда приходят с суффиксом "pump" — убираем
-            if address.endswith("pump") and len(address) > 44:
-                address = address[:-4]
-            resp = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{address}", timeout=10)
-            data = resp.json()
-            pairs = data.get("pairs", [])
+            if query.endswith("pump") and len(query) > 44:
+                query = query[:-4]
+            is_contract = bool(
+                re.match(r"^0x[0-9a-fA-F]{40}$", query) or
+                re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", query)
+            )
+            if is_contract:
+                resp = requests.get(
+                    f"https://api.dexscreener.com/latest/dex/tokens/{query}",
+                    headers={"Accept": "application/json"}, timeout=10
+                )
+            else:
+                resp = requests.get(
+                    "https://api.dexscreener.com/latest/dex/search",
+                    params={"q": query},
+                    headers={"Accept": "application/json"}, timeout=10
+                )
+            pairs = resp.json().get("pairs") or []
             if not pairs:
-                return f"Токен с адресом {address} не найден на Dexscreener."
+                return f"Токен {query!r} не найден на DexScreener. Попроси пользователя уточнить адрес контракта."
+            # Сортируем по ликвидности — берем самый ликвидный
+            pairs = sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)
             p = pairs[0]
             name_ = p.get("baseToken", {}).get("name", "?")
             symbol = p.get("baseToken", {}).get("symbol", "?")
-            price = p.get("priceUsd", "?")
-            change_24h = p.get("priceChange", {}).get("h24", 0)
+            price = p.get("priceUsd") or "?"
+            change_24h = (p.get("priceChange") or {}).get("h24") or 0
+            chain = p.get("chainId", "").capitalize()
+            dex = p.get("dexId", "").replace("-", " ").title()
+            vol = (p.get("volume") or {}).get("h24") or 0
             arrow = "📈" if change_24h >= 0 else "📉"
-            return f"{arrow} {name_} ({symbol}): ${price} ({change_24h:+.1f}%)"
+            result = f"{arrow} {name_} ({symbol}): ${price}\n24h: {change_24h:+.1f}%"
+            if vol:
+                result += f" | Vol: ${vol:,.0f}"
+            if chain:
+                result += f"\n{chain}"
+                if dex:
+                    result += f" · {dex}"
+            # Если по имени/тикеру нашлось несколько разных токенов — предупреждаем
+            if not is_contract:
+                same_sym = [x for x in pairs[1:6]
+                            if x.get("baseToken", {}).get("symbol", "").upper() == symbol.upper()]
+                if same_sym:
+                    result += f"\n⚠️ Несколько токенов с тикером {symbol} — показан с наибольшей ликвидностью. Для точного поиска укажи адрес контракта."
+            return result
         except Exception as e:
-            return f"Ошибка: {e}"
+            return f"Ошибка DexScreener: {e}"
 
     if name == "get_crypto_prices":
         try:
