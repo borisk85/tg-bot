@@ -1472,10 +1472,10 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             name_ = p.get("baseToken", {}).get("name", "?")
             symbol = p.get("baseToken", {}).get("symbol", "?")
             price = p.get("priceUsd") or "?"
-            change_24h = (p.get("priceChange") or {}).get("h24") or 0
+            change_24h = float((p.get("priceChange") or {}).get("h24") or 0)
             chain = p.get("chainId", "").capitalize()
             dex = p.get("dexId", "").replace("-", " ").title()
-            vol = (p.get("volume") or {}).get("h24") or 0
+            vol = float((p.get("volume") or {}).get("h24") or 0)
             arrow = "📈" if change_24h >= 0 else "📉"
             result = f"{arrow} {name_} ({symbol}): ${price}\n24h: {change_24h:+.1f}%"
             if vol:
