@@ -104,7 +104,7 @@ CRYPTO_TICKERS = {
 }
 
 def fetch_asset_price(ticker: str) -> float | None:
-    """Единый прайс-чекер: крипта через CoinGecko, остальное через yfinance."""
+    """Единый прайс-чекер: крипта через CoinGecko (Binance fallback), остальное через yfinance."""
     try:
         if ticker in CRYPTO_TICKERS:
             coin_id = CRYPTO_TICKERS[ticker]
@@ -114,7 +114,18 @@ def fetch_asset_price(ticker: str) -> float | None:
                 headers={"Accept": "application/json"},
                 timeout=10
             )
-            return resp.json().get(coin_id, {}).get("usd")
+            if resp.status_code == 200:
+                price = resp.json().get(coin_id, {}).get("usd")
+                if price:
+                    return price
+            # Binance fallback при rate-limit или пустом ответе
+            rb = requests.get(
+                "https://api.binance.com/api/v3/ticker/price",
+                params={"symbol": f"{ticker}USDT"}, timeout=8
+            )
+            if rb.status_code == 200:
+                return float(rb.json().get("price", 0)) or None
+            return None
         else:
             import yfinance as yf
             price = yf.Ticker(ticker).fast_info.last_price
