@@ -348,7 +348,9 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Контакты пользователя:
 - Жена: Дана, dana.aristanbayeva@gmail.com
 
-Правило: ПОДДЕРЖКА VELABOT — когда Boris просит ответить на баг-репорт или написать письмо пользователям VelaBot — ВСЕГДА используй from_email: "Vela Support <support@velabot.io>" в gmail_send. Это Send As алиас, уже настроен в Gmail.
+Правило: ПОДДЕРЖКА VELABOT — два канала ответа, используй только один в зависимости от контекста:
+1. Быстрый баг (починили) — Boris скажет "ответь в Telegram" или "отправь в TG" → velabot_notify_user(bot_id=..., text=...). bot_id берётся из текста баг-репорта.
+2. Долгий баг / обращение по email — Boris скажет "отправь письмо" → gmail_send с from_email: "Vela Support <support@velabot.io>". Это Send As алиас, уже настроен в Gmail.
 Тон: вежливый, профессиональный, на ты — как у современного SaaS стартапа.
 Подпись письма (всегда в конце, через пустую строку):
 --
@@ -863,6 +865,18 @@ TOOLS = [
                 "url": {"type": "string", "description": "Ссылка на пост в формате https://t.me/channelname/123"}
             },
             "required": ["url"]
+        }
+    },
+    {
+        "name": "velabot_notify_user",
+        "description": "Отправляет сообщение пользователю VelaBot прямо в его Telegram-бот по bot_id. Используй когда Boris хочет ответить на баг-репорт или уведомить юзера через Telegram (не по email). bot_id берётся из текста баг-репорта.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bot_id": {"type": "integer", "description": "ID бота из баг-репорта (например bot_id=28)"},
+                "text": {"type": "string", "description": "Текст сообщения для пользователя"}
+            },
+            "required": ["bot_id", "text"]
         }
     }
 ]
@@ -1991,6 +2005,24 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             url = tool_input["url"]
             raw = _run_async_in_thread(_fetch_tg_post(url))
             return raw
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "velabot_notify_user":
+        try:
+            api_url = os.getenv("VELABOT_API_URL", "").rstrip("/")
+            admin_secret = os.getenv("VELABOT_ADMIN_SECRET", "")
+            if not api_url or not admin_secret:
+                return "Ошибка: VELABOT_API_URL или VELABOT_ADMIN_SECRET не заданы."
+            resp = requests.post(
+                f"{api_url}/api/admin/notify-user",
+                json={"bot_id": tool_input["bot_id"], "text": tool_input["text"]},
+                headers={"x-admin-secret": admin_secret},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return f"Сообщение отправлено пользователю (bot_id={tool_input['bot_id']})."
+            return f"Ошибка Telegram API: {resp.status_code} — {resp.text}"
         except Exception as e:
             return f"Ошибка: {e}"
 
