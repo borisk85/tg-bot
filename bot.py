@@ -2610,7 +2610,7 @@ async def _process_media_group(group_id: str, context):
         await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передаёт в handle_message."""
+    """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передаёт в run_agent."""
     try:
         await context.bot.send_chat_action(update.effective_chat.id, action="typing")
         tg_file = await context.bot.get_file(update.message.voice.file_id)
@@ -2622,9 +2622,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         from groq import Groq as GroqClient
+        import io as _io
         groq_client = GroqClient(api_key=groq_key)
-        import io
-        audio_file = io.BytesIO(bytes(voice_bytes))
+        audio_file = _io.BytesIO(bytes(voice_bytes))
         audio_file.name = "voice.ogg"
         transcription = groq_client.audio.transcriptions.create(
             model="whisper-large-v3",
@@ -2636,10 +2636,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Не удалось распознать голосовое сообщение.")
             return
 
-        logger.info(f"Voice transcribed for user {update.effective_user.id}: {transcript[:80]}")
-        # Подменяем текст сообщения и передаём в обычный обработчик
-        update.message.text = f"🎤 {transcript}"
-        await handle_message(update, context)
+        user_id = update.effective_user.id
+        logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
+
+        async def send_photo(url: str):
+            await update.message.reply_photo(photo=url)
+
+        reply = await run_agent(user_id, f"🎤 {transcript}", None, send_photo=send_photo)
+        for i in range(0, len(reply), 4096):
+            await update.message.reply_text(reply[i:i + 4096])
 
     except Exception as e:
         logger.error(f"handle_voice error: {e}", exc_info=True)
