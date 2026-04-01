@@ -2643,7 +2643,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"handle_voice error: {e}", exc_info=True)
-        await update.message.reply_text("Не удалось обработать голосовое сообщение.")
+        await update.message.reply_text(f"Ошибка голосового: {type(e).__name__}: {e}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
