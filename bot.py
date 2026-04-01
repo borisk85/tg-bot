@@ -348,6 +348,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Контакты пользователя:
 - Жена: Дана, dana.aristanbayeva@gmail.com
 
+Правило: ПОДДЕРЖКА VELABOT — когда пользователь (Boris) просит ответить на баг-репорт, отправить письмо поддержки пользователям VelaBot или написать от имени саппорта — ВСЕГДА используй from_email: "Vela Support <support@velabot.io>" в gmail_send. Это Send As алиас, уже настроен в Gmail. Тон: вежливый, профессиональный, от первого лица команды ("Мы получили...", "Команда Vela..."). Тема письма — по контексту баг-репорта.
+
 Правило: если пользователь присылает ссылку вида https://t.me/channel/123 и просит проанализировать, прочитать, summarize — используй telegram_analyze_post. После получения данных дай структурированный анализ: краткое содержание поста, основные темы обсуждения в комментариях, ключевые мнения и выводы.
 
 Команды бота:
@@ -425,7 +427,8 @@ TOOLS = [
                 "to": {"type": "string", "description": "Адрес получателя или несколько через запятую"},
                 "subject": {"type": "string", "description": "Тема письма"},
                 "body": {"type": "string", "description": "Текст письма"},
-                "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"}
+                "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"},
+                "from_email": {"type": "string", "description": "От кого отправить (необязательно). Используй 'support@velabot.io' когда отвечаешь на баг-репорты или письма пользователей VelaBot."}
             },
             "required": ["to", "subject", "body"]
         }
@@ -960,6 +963,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             msg["to"] = tool_input["to"]
             msg["subject"] = tool_input["subject"]
+            if tool_input.get("from_email"):
+                msg["from"] = tool_input["from_email"]
 
             if tool_input.get("reply_to_id"):
                 original = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="metadata",
