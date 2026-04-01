@@ -580,6 +580,17 @@ TOOLS = [
         }
     },
     {
+        "name": "drive_delete",
+        "description": "Удаляет файл или папку из Google Drive (перемещает в корзину).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Название файла или папки"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
         "name": "drive_create_doc",
         "description": "Создаёт новый Google Doc с текстом.",
         "input_schema": {
@@ -1225,6 +1236,22 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 fields="id, name"
             ).execute()
             return "Файл перемещён."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "drive_delete":
+        try:
+            service = get_drive_service()
+            results = service.files().list(
+                q=f"name contains '{tool_input['query']}' and trashed = false",
+                fields="files(id, name)", pageSize=1
+            ).execute()
+            files = results.get("files", [])
+            if not files:
+                return f"Файл «{tool_input['query']}» не найден."
+            f = files[0]
+            service.files().update(fileId=f["id"], body={"trashed": True}).execute()
+            return f"Удалено в корзину: «{f['name']}»"
         except Exception as e:
             return f"Ошибка: {e}"
 
