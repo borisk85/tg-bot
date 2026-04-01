@@ -2609,6 +2609,43 @@ async def _process_media_group(group_id: str, context):
         logger.error(f"Error: {e}", exc_info=True)
         await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передаёт в handle_message."""
+    try:
+        await context.bot.send_chat_action(update.effective_chat.id, action="typing")
+        tg_file = await context.bot.get_file(update.message.voice.file_id)
+        voice_bytes = await tg_file.download_as_bytearray()
+
+        groq_key = os.getenv("GROQ_API_KEY")
+        if not groq_key:
+            await update.message.reply_text("GROQ_API_KEY не задан — голосовые сообщения недоступны.")
+            return
+
+        from groq import Groq as GroqClient
+        groq_client = GroqClient(api_key=groq_key)
+        import io
+        audio_file = io.BytesIO(bytes(voice_bytes))
+        audio_file.name = "voice.ogg"
+        transcription = groq_client.audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=audio_file,
+            language="ru",
+        )
+        transcript = transcription.text.strip()
+        if not transcript:
+            await update.message.reply_text("Не удалось распознать голосовое сообщение.")
+            return
+
+        logger.info(f"Voice transcribed for user {update.effective_user.id}: {transcript[:80]}")
+        # Подменяем текст сообщения и передаём в обычный обработчик
+        update.message.text = f"🎤 {transcript}"
+        await handle_message(update, context)
+
+    except Exception as e:
+        logger.error(f"handle_voice error: {e}", exc_info=True)
+        await update.message.reply_text("Не удалось обработать голосовое сообщение.")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
@@ -2728,6 +2765,7 @@ def main():
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     # Регистрируем команды в меню Telegram
