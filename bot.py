@@ -348,17 +348,6 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Контакты пользователя:
 - Жена: Дана, dana.aristanbayeva@gmail.com
 
-Правило: ПОДДЕРЖКА VELABOT — два канала ответа, используй только один в зависимости от контекста:
-1. Быстрый баг (починили) — Boris скажет "ответь в Telegram" или "отправь в TG" → velabot_notify_user(bot_id=..., text=...). bot_id берётся из текста баг-репорта.
-2. Долгий баг / обращение по email — Boris скажет "отправь письмо" → gmail_send с from_email: "Vela Support <support@velabot.io>". Это Send As алиас, уже настроен в Gmail.
-Тон: вежливый, профессиональный, на ты — как у современного SaaS стартапа.
-Подпись письма (всегда в конце, через пустую строку):
---
-Борис Комаров
-CEO & Основатель, Vela
-velabot.io
-Тема — по контексту баг-репорта.
-
 Правило: если пользователь присылает ссылку вида https://t.me/channel/123 и просит проанализировать, прочитать, summarize — используй telegram_analyze_post. После получения данных дай структурированный анализ: краткое содержание поста, основные темы обсуждения в комментариях, ключевые мнения и выводы.
 
 Команды бота:
@@ -436,8 +425,7 @@ TOOLS = [
                 "to": {"type": "string", "description": "Адрес получателя или несколько через запятую"},
                 "subject": {"type": "string", "description": "Тема письма"},
                 "body": {"type": "string", "description": "Текст письма"},
-                "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"},
-                "from_email": {"type": "string", "description": "От кого отправить (необязательно). Используй 'support@velabot.io' когда отвечаешь на баг-репорты или письма пользователей VelaBot."}
+                "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"}
             },
             "required": ["to", "subject", "body"]
         }
@@ -868,15 +856,14 @@ TOOLS = [
         }
     },
     {
-        "name": "velabot_notify_user",
-        "description": "Отправляет сообщение пользователю VelaBot прямо в его Telegram-бот по bot_id. Используй когда Boris хочет ответить на баг-репорт или уведомить юзера через Telegram (не по email). bot_id берётся из текста баг-репорта.",
+        "name": "gmail_send_draft",
+        "description": "Отправляет черновик из Gmail Drafts. Используй когда Boris говорит 'отправь черновик' или 'отправь' после того как черновик письма уже создан. keyword — ключевое слово из темы черновика.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "bot_id": {"type": "integer", "description": "ID бота из баг-репорта (например bot_id=28)"},
-                "text": {"type": "string", "description": "Текст сообщения для пользователя"}
+                "keyword": {"type": "string", "description": "Ключевое слово из темы черновика для поиска (необязательно — если черновик один, отправит его)"}
             },
-            "required": ["bot_id", "text"]
+            "required": []
         }
     }
 ]
@@ -984,8 +971,6 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             msg["to"] = tool_input["to"]
             msg["subject"] = tool_input["subject"]
-            if tool_input.get("from_email"):
-                msg["from"] = tool_input["from_email"]
 
             if tool_input.get("reply_to_id"):
                 original = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="metadata",
@@ -2008,21 +1993,28 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
-    if name == "velabot_notify_user":
+    if name == "gmail_send_draft":
         try:
-            api_url = os.getenv("VELABOT_API_URL", "").rstrip("/")
-            admin_secret = os.getenv("VELABOT_ADMIN_SECRET", "")
-            if not api_url or not admin_secret:
-                return "Ошибка: VELABOT_API_URL или VELABOT_ADMIN_SECRET не заданы."
-            resp = requests.post(
-                f"{api_url}/api/admin/notify-user",
-                json={"bot_id": tool_input["bot_id"], "text": tool_input["text"]},
-                headers={"x-admin-secret": admin_secret},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                return f"Сообщение отправлено пользователю (bot_id={tool_input['bot_id']})."
-            return f"Ошибка Telegram API: {resp.status_code} — {resp.text}"
+            service = get_gmail_service()
+            keyword = tool_input.get("keyword", "")
+            # Ищем черновик по ключевому слову в теме
+            drafts = service.users().drafts().list(userId="me").execute().get("drafts", [])
+            target = None
+            for d in drafts:
+                draft = service.users().drafts().get(userId="me", id=d["id"], format="metadata").execute()
+                headers = {h["name"]: h["value"] for h in draft["message"]["payload"]["headers"]}
+                subject = headers.get("Subject", "")
+                if keyword.lower() in subject.lower():
+                    target = d["id"]
+                    break
+            if not target:
+                # Если один черновик — берём его
+                if len(drafts) == 1:
+                    target = drafts[0]["id"]
+                else:
+                    return f"Черновик с '{keyword}' не найден. Доступно черновиков: {len(drafts)}."
+            service.users().drafts().send(userId="me", body={"id": target}).execute()
+            return f"Черновик отправлен."
         except Exception as e:
             return f"Ошибка: {e}"
 
