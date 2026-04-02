@@ -2757,6 +2757,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         # Сохраняем файл в буфер — может понадобиться как вложение к письму
         _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": fname, "mime": mime}
+        if not user_text and not mime.startswith("image/") and mime not in ("text/plain", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"):
+            await update.message.reply_text(f"📎 Файл сохранён: {fname}")
+            return
         if mime.startswith("image/"):
             import base64
             image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
