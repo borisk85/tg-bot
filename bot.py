@@ -2741,6 +2741,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
+        # Сохраняем фото как вложение — может понадобиться для gmail_send
+        _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": "photo.jpg", "mime": "image/jpeg"}
     elif update.message.document:
         tg_file = await context.bot.get_file(update.message.document.file_id)
         file_bytes = await tg_file.download_as_bytearray()
