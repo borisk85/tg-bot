@@ -296,6 +296,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Отвечаешь на русском языке. Используй доступные инструменты когда нужно.
 ВАЖНО: никогда не используй markdown: запрещены **, __, *, _, `, #, ~. Только plain text без какого-либо форматирования.
 ВАЖНО: никогда не используй букву Ё/ё — только Е/е во всех словах (например "ещё" → "еще", "всё" → "все", "её" → "ее").
+ВАЖНО: никогда не используй слова "алерт", "крипта" — только "уведомление" и "криптовалюта/криптовалюты" и их склонения.
 Тон — профессиональный и деловой. Без панибратства, без фамильярных смайлов (😅, 😊, 😄, 🤗, 😉 и подобных).
 Эмодзи — только нейтральные и контекстные: погода, анализ фото, задачи, события, курсы. Максимум 1-2 на ответ. На серьёзные темы (бизнес, советы, анализ, ошибки, технические вопросы) — без эмодзи.
 Правило контекста действий: когда ты выполняешь действия по просьбе пользователя (отправка письма, создание события и т.д.) — ты действуешь как агент от имени пользователя. Говори "отправил за тебя", "написал от твоего имени", "сделано" — но не присваивай себе авторство и не говори "я написал" как будто ты автор. Пользователь — автор, ты — исполнитель.
@@ -313,7 +314,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: когда спрашивают калории — отвечай кратко: название блюда и ккал. Если несколько — список и итого. Если на фото еда — определи блюда и дай калории по каждому и итого.
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и другие основные монеты по тикеру — ТОЛЬКО get_crypto_prices. search_token (DexScreener) — для редких/неизвестных токенов: принимает название, тикер или адрес контракта (строка 32-48 символов, может заканчиваться на "pump"). НИКОГДА не жди все адреса сразу — получил один адрес, сразу вызывай search_token. НИКОГДА не уточняй "чей это адрес" — инструмент сам вернёт название токена. НИКОГДА не используй search_token для BTC/ETH/SOL/BNB/XRP/DOGE и других монет из get_crypto_prices.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
-Правило: ЦЕНОВЫЕ АЛЕРТЫ — когда пользователь говорит "уведоми когда", "алерт на цену", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Алерт установлен: уведомлю когда [тикер] [вырастет до / упадет до] $[цена]".
+Правило: ЦЕНОВЫЕ УВЕДОМЛЕНИЯ — когда пользователь говорит "уведоми когда", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Готово 🔔 Напишу, как только [тикер] [вырастет до / упадет до] $[цена]".
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
 Правило: если спрашивают цену редкого/неизвестного токена по названию или тикеру (не из основного списка) — НЕМЕДЛЕННО вызови search_token с этим названием/тикером. Не проси пользователя уточнять — ищи сам. Только если search_token ничего не нашел — тогда попроси адрес контракта.
@@ -666,7 +667,7 @@ TOOLS = [
     },
     {
         "name": "alert_price_set",
-        "description": "Устанавливает ценовой алерт: уведомит когда актив достигнет заданной цены. Используй для крипты (BTC, ETH, SOL, DOGE и др.), металлов (GC=F=золото, SI=F=серебро), индексов (^IXIC=NASDAQ, ^GSPC=S&P500) и акций (TSLA, AAPL и др.).",
+        "description": "Устанавливает ценовое уведомление: напишет пользователю когда актив достигнет заданной цены. Используй для крипты (BTC, ETH, SOL, DOGE и др.), металлов (GC=F=золото, SI=F=серебро), индексов (^IXIC=NASDAQ, ^GSPC=S&P500) и акций (TSLA, AAPL и др.).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -679,17 +680,17 @@ TOOLS = [
     },
     {
         "name": "alert_price_list",
-        "description": "Показывает все активные ценовые алерты пользователя.",
+        "description": "Показывает все активные ценовые уведомления пользователя.",
         "input_schema": {"type": "object", "properties": {}, "required": []}
     },
     {
         "name": "alert_price_cancel",
-        "description": "Отменяет ценовой алерт по номеру из alert_price_list (начиная с 1) или по тикеру.",
+        "description": "Отменяет ценовое уведомление по номеру из alert_price_list (начиная с 1) или по тикеру.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "index": {"type": "integer", "description": "Номер алерта из alert_price_list (начиная с 1)"},
-                "ticker": {"type": "string", "description": "Тикер актива — удалит все алерты по этому тикеру"}
+                "index": {"type": "integer", "description": "Номер уведомления из alert_price_list (начиная с 1)"},
+                "ticker": {"type": "string", "description": "Тикер актива — удалит все уведомления по этому тикеру"}
             }
         }
     },
@@ -1470,14 +1471,14 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             })
             save_price_alerts(user_id, alerts)
             direction_text = "вырастет до" if direction == "above" else "упадет до"
-            return f"Алерт установлен: уведомлю когда {ticker} {direction_text} ${target:,.2f}"
+            return f"Уведомление установлено: напишу когда {ticker} {direction_text} ${target:,.2f}"
         except Exception as e:
             return f"Ошибка: {e}"
 
     if name == "alert_price_list":
         alerts = get_price_alerts(user_id)
         if not alerts:
-            return "Нет активных ценовых алертов."
+            return "Нет активных ценовых уведомлений."
         lines = []
         for i, a in enumerate(alerts, 1):
             direction_text = "вырастет до" if a["direction"] == "above" else "упадет до"
@@ -1487,21 +1488,21 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     if name == "alert_price_cancel":
         alerts = get_price_alerts(user_id)
         if not alerts:
-            return "Нет активных алертов."
+            return "Нет активных уведомлений."
         if "index" in tool_input:
             idx = tool_input["index"] - 1
             if idx < 0 or idx >= len(alerts):
-                return "Алерт не найден."
+                return "Уведомление не найдено."
             removed = alerts.pop(idx)
             save_price_alerts(user_id, alerts)
-            return f"Алерт на {removed['ticker']} отменен."
+            return f"Уведомление на {removed['ticker']} отменено."
         elif "ticker" in tool_input:
             ticker = tool_input["ticker"].upper()
             new_alerts = [a for a in alerts if a["ticker"] != ticker]
             if len(new_alerts) == len(alerts):
-                return f"Алертов на {ticker} не найдено."
+                return f"Уведомлений на {ticker} не найдено."
             save_price_alerts(user_id, new_alerts)
-            return f"Алерты на {ticker} отменены."
+            return f"Уведомления на {ticker} отменены."
         return "Укажи index или ticker."
 
     if name in ("get_token_info", "search_token"):
@@ -2424,12 +2425,12 @@ async def check_price_alerts(context):
                         (a["direction"] == "below" and price <= a["target_price"])
             if triggered:
                 direction_text = "достиг" if a["direction"] == "above" else "упал до"
-                msg = f"🔔 Алерт сработал! {a['ticker']} {direction_text} ${price:,.2f} (цель: ${a['target_price']:,.2f})"
+                msg = f"🔔 {a['ticker']} {direction_text} ${price:,.2f} (цель: ${a['target_price']:,.2f})"
                 try:
                     await context.bot.send_message(chat_id=user_id, text=msg)
                     fired = True
                 except Exception as e:
-                    logger.error(f"Ошибка отправки алерта: {e}")
+                    logger.error(f"Ошибка отправки уведомления: {e}")
                     remaining.append(a)
             else:
                 remaining.append(a)
@@ -2463,7 +2464,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Google Calendar — события, встречи, напоминания\n"
         "• Google Tasks — списки задач и идей\n"
         "• Напоминания — «напомни через 2 часа принять таблетку»\n"
-        "• Ценовые алерты — «уведоми когда BTC упадет до 80000»\n\n"
+        "• Ценовые уведомления — «уведоми когда BTC упадет до 80000»\n\n"
         "📬 Почта и файлы\n"
         "• Gmail — читать, искать, отправлять письма с вложениями\n"
         "• Google Drive — искать, читать, создавать документы/таблицы/папки\n"
