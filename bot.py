@@ -336,6 +336,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: КОДЫ ИЗ ПИСЕМ — когда пользователь просит "код из письма", "цифры из письма", "код подтверждения", "OTP", "verification code" и не указывает конкретного отправителя — немедленно вызови gmail_search с запросом "in:inbox" (или "verification OR code OR код OR подтверждение", maxResults=1), потом gmail_read на первое найденное письмо, выдай код. Не переспрашивай "от кого письмо?" — просто читай последнее входящее.
 
+Правило: ПЕРЕХОД ПО ССЫЛКЕ ИЗ ПИСЬМА — когда пользователь просит "перейди по ссылке", "подтверди", "кликни", "нажми на кнопку подтверждения", "верифицируй", "активируй" — используй open_url. Сначала вызови gmail_read чтобы найти нужную ссылку в письме, потом вызови open_url с этой ссылкой. Никогда не говори что "не могу открывать ссылки" — инструмент open_url именно для этого.
+
 Правило: Tasks — редактирование:
 - Если нужно добавить текст к существующей задаче/идее — используй tasks_update с append_notes
 - Если нужно удалить дубликат или ненужную задачу — используй tasks_delete
@@ -490,6 +492,18 @@ TOOLS = [
                 "message_id": {"type": "string", "description": "ID письма рассылки"}
             },
             "required": ["message_id"]
+        }
+    },
+    {
+        "name": "open_url",
+        "description": "Открывает URL и возвращает результат. Используй когда нужно перейти по ссылке из письма: подтвердить email, верифицировать аккаунт, активировать сервис, подтвердить действие. Claude сам извлекает нужную ссылку из письма через gmail_read и передаёт сюда.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL для перехода"},
+                "method": {"type": "string", "description": "HTTP метод: GET (по умолчанию) или POST", "enum": ["GET", "POST"]}
+            },
+            "required": ["url"]
         }
     },
     {
@@ -1093,6 +1107,31 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 return f"Ссылка для отписки не найдена ни в заголовках, ни в теле письма. Рассылка: {subject} от {sender}. Придется открыть письмо вручную."
         except Exception as e:
             return f"Ошибка: {e}"
+
+    if name == "open_url":
+        try:
+            import re as _re
+            url = tool_input["url"]
+            method = tool_input.get("method", "GET").upper()
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            if method == "POST":
+                resp = requests.post(url, timeout=15, allow_redirects=True, headers=headers)
+            else:
+                resp = requests.get(url, timeout=15, allow_redirects=True, headers=headers)
+            # Извлечь заголовок страницы из HTML
+            title_match = _re.search(r'<title[^>]*>([^<]{1,200})</title>', resp.text, _re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else ""
+            # Краткий текст страницы (без тегов)
+            text = _re.sub(r'<[^>]+>', ' ', resp.text)
+            text = _re.sub(r'\s+', ' ', text).strip()[:300]
+            result = f"HTTP {resp.status_code} | URL: {resp.url}"
+            if title:
+                result += f"\nЗаголовок: {title}"
+            if text:
+                result += f"\nСодержимое: {text}"
+            return result
+        except Exception as e:
+            return f"Ошибка при открытии URL: {e}"
 
     if name == "gmail_trash_many":
         try:
