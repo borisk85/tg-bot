@@ -2746,10 +2746,18 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
 
+        # Если перед голосовым было сохранено фото — передаём его в агент
+        import base64 as _b64
+        pending = _pending_attachments.get(user_id)
+        image_data = None
+        if pending and pending.get("mime", "").startswith("image/"):
+            _pending_attachments.pop(user_id, None)
+            image_data = {"media_type": pending["mime"], "data": _b64.b64encode(pending["bytes"]).decode()}
+
         async def send_photo(url: str):
             await update.message.reply_photo(photo=url)
 
-        reply = await run_agent(user_id, f"🎤 {transcript}", None, send_photo=send_photo)
+        reply = await run_agent(user_id, f"🎤 {transcript}", image_data, send_photo=send_photo)
         for i in range(0, len(reply), 4096):
             await update.message.reply_text(reply[i:i + 4096])
 
