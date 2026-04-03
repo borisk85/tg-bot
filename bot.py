@@ -2650,7 +2650,11 @@ async def _process_media_group(group_id: str, context):
             await update.message.reply_text(reply[i:i + 4096])
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
+        from anthropic import OverloadedError as _OverloadedError
+        if isinstance(e, _OverloadedError):
+            await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
+        else:
+            await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передаёт в run_agent."""
@@ -2799,7 +2803,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reply[i:i + 4096])
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
+        from anthropic import OverloadedError as _OverloadedError
+        if isinstance(e, _OverloadedError):
+            await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
+        else:
+            await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
