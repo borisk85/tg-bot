@@ -951,8 +951,10 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 # Убираем style/script блоки целиком вместе с содержимым
                 body = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL | _re.IGNORECASE)
                 body = _re.sub(r'<script[^>]*>.*?</script>', '', body, flags=_re.DOTALL | _re.IGNORECASE)
-                # Извлекаем все href-ссылки из <a> тегов ДО снятия тегов
-                links = _re.findall(r'<a[^>]+href=["\']([^"\']{10,})["\'][^>]*>([^<]{1,80})</a>', body, _re.IGNORECASE)
+                # Извлекаем href-ссылки из <a> тегов ДО снятия тегов
+                links = _re.findall(r'<a[^>]+href=["\']([^"\']{10,})["\'][^>]*>(.*?)</a>', body, _re.IGNORECASE | _re.DOTALL)
+                # Извлекаем form action URLs
+                form_actions = _re.findall(r'<form[^>]+action=["\']([^"\']{10,})["\']', body, _re.IGNORECASE)
                 # Заменяем <br>, <p>, <tr>, <li> на переносы для читаемости
                 body = _re.sub(r'<(br|p|tr|li)[^>]*>', '\n', body, flags=_re.IGNORECASE)
                 # Снимаем оставшиеся теги
@@ -961,13 +963,21 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 body = body.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
                 body = _re.sub(r'[ \t]+', ' ', body)
                 body = _re.sub(r'\n{3,}', '\n\n', body).strip()
-                # Добавляем извлечённые ссылки в конец (только не-трекинговые, значимые)
-                if links:
-                    skip_patterns = ('unsubscribe', 'track', 'pixel', 'open.php', 'click.php', 'beacon', '.gif', '.png', '.jpg')
-                    meaningful = [(text.strip(), url) for url, text in links
-                                  if not any(p in url.lower() for p in skip_patterns) and url.startswith('http')]
-                    if meaningful:
-                        body += "\n\n[Ссылки из письма:]\n" + "\n".join(f"- {text}: {url}" for text, url in meaningful[:10])
+                # Добавляем извлечённые ссылки в конец (исключаем только пиксели/картинки)
+                skip_ext = ('.gif', '.png', '.jpg', '.jpeg', '.svg', '.ico', '.woff')
+                collected = []
+                for url, raw_text in links:
+                    if not url.startswith('http'):
+                        continue
+                    if any(url.lower().endswith(e) for e in skip_ext):
+                        continue
+                    text = _re.sub(r'<[^>]+>', '', raw_text).strip()[:60] or url[:60]
+                    collected.append((text, url))
+                for url in form_actions:
+                    if url.startswith('http'):
+                        collected.append(('(форма)', url))
+                if collected:
+                    body += "\n\n[Ссылки из письма:]\n" + "\n".join(f"- {text}: {url}" for text, url in collected[:15])
             else:
                 body = "(текст письма не удалось извлечь)"
 
