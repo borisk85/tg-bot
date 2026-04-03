@@ -951,6 +951,8 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 # Убираем style/script блоки целиком вместе с содержимым
                 body = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL | _re.IGNORECASE)
                 body = _re.sub(r'<script[^>]*>.*?</script>', '', body, flags=_re.DOTALL | _re.IGNORECASE)
+                # Извлекаем все href-ссылки из <a> тегов ДО снятия тегов
+                links = _re.findall(r'<a[^>]+href=["\']([^"\']{10,})["\'][^>]*>([^<]{1,80})</a>', body, _re.IGNORECASE)
                 # Заменяем <br>, <p>, <tr>, <li> на переносы для читаемости
                 body = _re.sub(r'<(br|p|tr|li)[^>]*>', '\n', body, flags=_re.IGNORECASE)
                 # Снимаем оставшиеся теги
@@ -959,6 +961,13 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 body = body.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
                 body = _re.sub(r'[ \t]+', ' ', body)
                 body = _re.sub(r'\n{3,}', '\n\n', body).strip()
+                # Добавляем извлечённые ссылки в конец (только не-трекинговые, значимые)
+                if links:
+                    skip_patterns = ('unsubscribe', 'track', 'pixel', 'open.php', 'click.php', 'beacon', '.gif', '.png', '.jpg')
+                    meaningful = [(text.strip(), url) for url, text in links
+                                  if not any(p in url.lower() for p in skip_patterns) and url.startswith('http')]
+                    if meaningful:
+                        body += "\n\n[Ссылки из письма:]\n" + "\n".join(f"- {text}: {url}" for text, url in meaningful[:10])
             else:
                 body = "(текст письма не удалось извлечь)"
 
