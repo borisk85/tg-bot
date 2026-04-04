@@ -363,6 +363,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: если пользователь присылает ссылку вида https://t.me/channel/123 и просит проанализировать, прочитать, summarize — используй telegram_analyze_post. После получения данных дай структурированный анализ: краткое содержание поста, основные темы обсуждения в комментариях, ключевые мнения и выводы.
 
+Правило: когда пользователь присылает URL сайта и просит прочитать, резюмировать или проанализировать — используй read_webpage. Не говори "не могу читать JS-сайты" — read_webpage справляется с React/Next.js. open_url использовать только для confirmation/verification ссылок из писем.
+
 Правило: АВИАБИЛЕТЫ — для поиска рейсов, перелётов и авиабилетов ВСЕГДА используй search_flights, не web_search. Инструмент работает для ЛЮБЫХ маршрутов — и международных, и внутренних (например Алматы → Астана). "Туда и обратно" → один вызов с round_trip=true. Результат search_flights — выводи ДОСЛОВНО, без изменений, сокращений и пересказа.
 
 Команды бота:
@@ -891,6 +893,17 @@ TOOLS = [
                 "keyword": {"type": "string", "description": "Ключевое слово из темы черновика для поиска (необязательно — если черновик один, отправит его)"}
             },
             "required": []
+        }
+    },
+    {
+        "name": "read_webpage",
+        "description": "Читает полное содержимое любой веб-страницы, включая React/Next.js сайты. Возвращает чистый текст/markdown. Используй когда пользователь присылает URL и просит прочитать, резюмировать, проанализировать сайт, лендинг, статью, документацию. Не использовать для confirmation-ссылок из писем — для них open_url.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL страницы для чтения"}
+            },
+            "required": ["url"]
         }
     },
     {
@@ -2116,6 +2129,28 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     return f"Черновик с '{keyword}' не найден. Доступно черновиков: {len(drafts)}."
             service.users().drafts().send(userId="me", body={"id": target}).execute()
             return f"Черновик отправлен."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "read_webpage":
+        try:
+            api_key = os.getenv("FIRECRAWL_API_KEY")
+            if not api_key:
+                return "FIRECRAWL_API_KEY не задан."
+            url = tool_input["url"]
+            resp = requests.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"url": url, "formats": ["markdown"]},
+                timeout=30
+            )
+            data = resp.json()
+            if not data.get("success"):
+                return f"Не удалось прочитать страницу: {data.get('error', resp.status_code)}"
+            content = data.get("data", {}).get("markdown", "")
+            if not content:
+                return "Страница загрузилась, но контент пустой."
+            return content[:8000]
         except Exception as e:
             return f"Ошибка: {e}"
 
