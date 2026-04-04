@@ -2747,11 +2747,17 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
 
         # Если голосовое переслано от другого человека — показываем транскрипт напрямую
-        if update.message.forward_date or update.message.forward_origin:
+        is_forwarded = (
+            getattr(update.message, "forward_origin", None) is not None or
+            getattr(update.message, "forward_from", None) is not None or
+            getattr(update.message, "forward_sender_name", None) is not None
+        )
+        if is_forwarded:
             sender = ""
-            if update.message.forward_from:
-                name = update.message.forward_from.full_name
-                sender = f" (от {name})"
+            if getattr(update.message, "forward_from", None):
+                sender = f" (от {update.message.forward_from.full_name})"
+            elif getattr(update.message, "forward_sender_name", None):
+                sender = f" (от {update.message.forward_sender_name})"
             await update.message.reply_text(f"Текст голосового{sender}:\n\n{transcript}")
             return
 
