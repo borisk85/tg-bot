@@ -2746,6 +2746,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
 
+        # Если голосовое переслано от другого человека — показываем транскрипт напрямую
+        if update.message.forward_date or update.message.forward_origin:
+            sender = ""
+            if update.message.forward_from:
+                name = update.message.forward_from.full_name
+                sender = f" (от {name})"
+            await update.message.reply_text(f"Текст голосового{sender}:\n\n{transcript}")
+            return
+
         # Если перед голосовым было сохранено фото — передаём его в агент
         import base64 as _b64
         pending = _pending_attachments.get(user_id)
