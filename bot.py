@@ -10,7 +10,7 @@ def now_local():
     return datetime.now(TZ)
 from dotenv import load_dotenv
 from anthropic import Anthropic
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 import re
@@ -300,6 +300,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Тон — профессиональный и деловой. Без панибратства, без фамильярных смайлов (😅, 😊, 😄, 🤗, 😉 и подобных).
 ВАЖНО: ты — ИИ, не человек. Никогда не говори "мы" когда имеешь в виду людей или ставишь себя в один ряд с людьми. Говори "вы", "люди", "человек", "пользователи" — но не "мы". "Мы" допустимо только в контексте совместной работы с пользователем ("мы можем сделать X", "давай мы разберём").
 ВАЖНО: не тащи старые темы в новые сообщения. Если разговор сменил направление — отвечай на то что сказано сейчас, не возвращайся к конкретным примерам из прошлых сообщений без явной причины. Упомянутый ранее человек, случай или пример — не повод вставлять его в каждый следующий ответ. Следи за текущим направлением разговора, а не за историей.
+ВАЖНО: НИКОГДА не выдумывай контекст который не существует. Запрещено писать "именно об этом мы говорили раньше", "как мы уже обсуждали", "помнишь мы говорили" если этого разговора не было в истории диалога. Если не уверен — не добавляй отсылку к прошлому. Галлюцинация контекста хуже чем его отсутствие.
 Эмодзи — только нейтральные и контекстные: погода, анализ фото, задачи, события, курсы. Максимум 1-2 на ответ. На серьёзные темы (бизнес, советы, анализ, ошибки, технические вопросы) — без эмодзи.
 Правило контекста действий: когда ты выполняешь действия по просьбе пользователя (отправка письма, создание события и т.д.) — ты действуешь как агент от имени пользователя. Говори "отправил за тебя", "написал от твоего имени", "сделано" — но не присваивай себе авторство и не говори "я написал" как будто ты автор. Пользователь — автор, ты — исполнитель.
 Текущая дата и время: {datetime}
@@ -360,6 +361,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 - Жена: Дана, dana.aristanbayeva@gmail.com
 
 Правило: если пользователь присылает ссылку вида https://t.me/channel/123 и просит проанализировать, прочитать, summarize — используй telegram_analyze_post. После получения данных дай структурированный анализ: краткое содержание поста, основные темы обсуждения в комментариях, ключевые мнения и выводы.
+
+Правило: АВИАБИЛЕТЫ — для поиска рейсов, перелётов и авиабилетов ВСЕГДА используй search_flights, не web_search. Инструмент работает для ЛЮБЫХ маршрутов — и международных, и внутренних (например Алматы → Астана). "Туда и обратно" → один вызов с round_trip=true. Результат search_flights — выводи ДОСЛОВНО, без изменений, сокращений и пересказа.
 
 Команды бота:
 /clear — очистить историю
@@ -888,12 +891,34 @@ TOOLS = [
             },
             "required": []
         }
+    },
+    {
+        "name": "search_flights",
+        "description": "Ищет авиабилеты через Travelpayouts/Aviasales. Используй для любых запросов о рейсах, перелётах, авиабилетах — международных и внутренних. Результат возвращать ДОСЛОВНО без изменений.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "description": "Город вылета (например: Алматы, Москва, ALA). Принимает название на русском или IATA-код."},
+                "destination": {"type": "string", "description": "Город назначения (например: Дубай, Стамбул, DXB). Принимает название на русском или IATA-код."},
+                "month": {"type": "string", "description": "Месяц перелёта в формате YYYY-MM (например: 2026-05)"},
+                "max_price": {"type": "number", "description": "Максимальная цена в USD (необязательно)"},
+                "direct_only": {"type": "boolean", "description": "Только прямые рейсы (по умолчанию false)"},
+                "airline": {"type": "string", "description": "Предпочтительная авиакомпания (необязательно, например: Air Astana, Turkish Airlines, Emirates)"},
+                "departure_time": {"type": "string", "description": "Время вылета: утро / день / вечер / ночь (необязательно)"},
+                "max_duration_hours": {"type": "number", "description": "Максимальное время в пути в часах (необязательно)"},
+                "day_from": {"type": "integer", "description": "Вылет начиная с числа месяца (необязательно, 1-31)"},
+                "day_to": {"type": "integer", "description": "Вылет не позже числа месяца (необязательно, 1-31)"},
+                "round_trip": {"type": "boolean", "description": "Туда-обратно — один вызов возвращает обе части (по умолчанию false)"},
+                "return_month": {"type": "string", "description": "Месяц обратного рейса в формате YYYY-MM, если отличается от основного (необязательно)"}
+            },
+            "required": ["origin", "destination", "month"]
+        }
     }
 ]
 
 # ── Tool execution ────────────────────────────────────────────────────────────
 
-def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
+async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     logger.info(f"Tool: {name}({json.dumps(tool_input, ensure_ascii=False)})")
 
     if name == "get_current_datetime":
@@ -2085,6 +2110,27 @@ def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка: {e}"
 
+    if name == "search_flights":
+        try:
+            from flights import FlightsModule
+            module = FlightsModule()
+            return await module.search(
+                origin=tool_input["origin"],
+                destination=tool_input["destination"],
+                month=tool_input["month"],
+                max_price=tool_input.get("max_price"),
+                direct_only=tool_input.get("direct_only", False),
+                airline=tool_input.get("airline"),
+                departure_time=tool_input.get("departure_time"),
+                max_duration_hours=tool_input.get("max_duration_hours"),
+                day_from=tool_input.get("day_from"),
+                day_to=tool_input.get("day_to"),
+                round_trip=tool_input.get("round_trip", False),
+                return_month=tool_input.get("return_month"),
+            )
+        except Exception as e:
+            return f"Ошибка поиска рейсов: {e}"
+
     return f"[Инструмент '{name}' не найден]"
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
@@ -2150,7 +2196,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
             tool_results = []
             for block in assistant_content:
                 if block.type == "tool_use":
-                    result = execute_tool(block.name, block.input, user_id)
+                    result = await execute_tool(block.name, block.input, user_id)
                     if result.startswith("IMAGE_URL:") and send_photo:
                         url = result[len("IMAGE_URL:"):]
                         await send_photo(url)
@@ -2167,6 +2213,26 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 
     set_history(user_id, serialize_messages(messages))
     return "Не удалось получить ответ."
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _send_reply(reply: str, message):
+    """Отправляет ответ агента. Если FLIGHTS_BTN: — добавляет кнопку Aviasales."""
+    if reply.startswith("FLIGHTS_BTN:"):
+        rest = reply[len("FLIGHTS_BTN:"):]
+        first_nl = rest.find("\n")
+        btn_url = rest[:first_nl].strip()
+        text_body = rest[first_nl + 1:].strip()
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти на Aviasales", url=btn_url)]])
+        for i in range(0, len(text_body), 4096):
+            await message.reply_text(
+                text_body[i:i + 4096],
+                parse_mode="HTML",
+                reply_markup=keyboard if i == 0 else None
+            )
+    else:
+        for i in range(0, len(reply), 4096):
+            await message.reply_text(reply[i:i + 4096])
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -2574,8 +2640,7 @@ async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     try:
         reply = await run_agent(user_id, injected)
-        for i in range(0, len(reply), 4096):
-            await update.message.reply_text(reply[i:i + 4096])
+        await _send_reply(reply, update.message)
     except Exception as e:
         logger.error(f"cmd_about error: {e}", exc_info=True)
         await update.message.reply_text("Ошибка при сохранении. Попробуй ещё раз.")
@@ -2706,8 +2771,7 @@ async def _process_media_group(group_id: str, context):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
-        for i in range(0, len(reply), 4096):
-            await update.message.reply_text(reply[i:i + 4096])
+        await _send_reply(reply, update.message)
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         from anthropic import OverloadedError as _OverloadedError
@@ -2786,8 +2850,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_photo(photo=url)
 
         reply = await run_agent(user_id, f"🎤 {transcript}", image_data, send_photo=send_photo)
-        for i in range(0, len(reply), 4096):
-            await update.message.reply_text(reply[i:i + 4096])
+        await _send_reply(reply, update.message)
 
     except Exception as e:
         logger.error(f"handle_voice error: {e}", exc_info=True)
@@ -2895,8 +2958,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
-        for i in range(0, len(reply), 4096):
-            await update.message.reply_text(reply[i:i + 4096])
+        await _send_reply(reply, update.message)
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         from anthropic import OverloadedError as _OverloadedError
