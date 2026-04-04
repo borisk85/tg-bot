@@ -326,6 +326,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: если пользователь просит создать SVG, HTML, код или любой текстовый файл — создай его через drive_create_doc и дай ссылку. Не вставляй содержимое файла в чат.
 Правило: generate_image НЕЛЬЗЯ использовать для логотипов, иконок, SVG-фигур и любых задач где важна точная форма или цвет существующей фигуры. Для таких задач — только SVG через drive_create_doc. generate_image — исключительно для новых фото/арт изображений (люди, пейзажи, сцены).
 Правило: ДОЛГОСРОЧНАЯ ПАМЯТЬ — автоматически сохраняй через memory_save когда пользователь называет: email-адреса ("отправь на ...", "адрес ...", "почта ..."), имена и контакты ("это мой друг Алексей", "коллега Дана"), часто используемые адреса и реквизиты, криптовалютные адреса и тикеры токенов. Для всего остального (темы обсуждений, товары, случайные интересы) — сохраняй ТОЛЬКО по явной просьбе ("запомни что...", "/about ..."). Явная просьба забыть ("забудь что...") — удаляй. При ответе используй то что уже есть в памяти — не переспрашивай то что уже знаешь.
+КРИТИЧНО: если ты сам спросил "на какой адрес?" или "скинь email" — и пользователь ответил голым email-адресом — НЕМЕДЛЕННО вызови memory_save с key="email [имя из контекста разговора]", value="[адрес]" ПРЕЖДЕ чем отправлять письмо. Не жди явной просьбы "запомни" — сохраняй автоматически. Пример: спрашивал про "криптоденьги", получил "criptodengi@gmail.com" → memory_save(key="email криптоденьги", value="criptodengi@gmail.com").
 
 Правило: ПИСЬМА — при чтении и пересказе писем ВСЕГДА показывай оригинальный текст письма как есть, без перевода. Переводи на русский ТОЛЬКО если пользователь явно попросил "переведи" или "на русском". Если письмо на английском — показывай на английском.
 
@@ -1021,18 +1022,25 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             from email import encoders
             service = get_gmail_service()
 
-            # Проверяем есть ли вложение от пользователя
-            attachment = _pending_attachments.pop(user_id, None) if user_id else None
+            # Проверяем есть ли вложения от пользователя (одно или список)
+            raw_att = _pending_attachments.pop(user_id, None) if user_id else None
+            if raw_att is None:
+                attachments = []
+            elif isinstance(raw_att, list):
+                attachments = raw_att
+            else:
+                attachments = [raw_att]
 
-            if attachment:
+            if attachments:
                 msg = MIMEMultipart()
                 msg.attach(MIMEText(tool_input["body"], "plain", "utf-8"))
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(attachment["bytes"])
-                encoders.encode_base64(part)
-                part.add_header("Content-Disposition", f'attachment; filename="{attachment["filename"]}"')
-                part.add_header("Content-Type", attachment["mime"])
-                msg.attach(part)
+                for att in attachments:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(att["bytes"])
+                    encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", f'attachment; filename="{att["filename"]}"')
+                    part.add_header("Content-Type", att["mime"])
+                    msg.attach(part)
             else:
                 msg = MIMEText(tool_input["body"], "plain", "utf-8")
 
@@ -1053,8 +1061,9 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 body["threadId"] = thread.get("threadId")
             service.users().messages().send(userId="me", body=body).execute()
             result = f"Письмо отправлено на {tool_input['to']}."
-            if attachment:
-                result += f" Вложение: {attachment['filename']}."
+            if attachments:
+                names = ", ".join(a["filename"] for a in attachments)
+                result += f" Вложения: {names}."
             return result
         except Exception as e:
             return f"Ошибка: {e}"
@@ -2764,6 +2773,11 @@ async def _process_media_group(group_id: str, context):
     import base64
     image_data = {"media_type": "image/jpeg", "data": base64.b64encode(photos[0]).decode()}
     user_text = caption
+    # Сохраняем ВСЕ фото альбома в буфер для gmail_send
+    _pending_attachments[user_id] = [
+        {"bytes": bytes(p), "filename": f"photo_{i+1}.jpg" if len(photos) > 1 else "photo.jpg", "mime": "image/jpeg"}
+        for i, p in enumerate(photos)
+    ]
 
     async def send_photo(url: str):
         await update.message.reply_photo(photo=url)
@@ -2841,6 +2855,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Если перед голосовым было сохранено фото — передаём его в агент
         import base64 as _b64
         pending = _pending_attachments.get(user_id)
+        if isinstance(pending, list):
+            pending = pending[0] if pending else None
         image_data = None
         if pending and pending.get("mime", "").startswith("image/"):
             _pending_attachments.pop(user_id, None)
