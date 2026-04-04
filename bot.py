@@ -2754,10 +2754,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if is_forwarded:
             sender = ""
-            if getattr(update.message, "forward_from", None):
-                sender = f" (от {update.message.forward_from.full_name})"
-            elif getattr(update.message, "forward_sender_name", None):
-                sender = f" (от {update.message.forward_sender_name})"
+            origin = getattr(update.message, "forward_origin", None)
+            if origin:
+                # MessageOriginUser
+                if hasattr(origin, "sender_user") and origin.sender_user:
+                    sender = f" (от {origin.sender_user.full_name})"
+                # MessageOriginHiddenUser
+                elif hasattr(origin, "sender_user_name") and origin.sender_user_name:
+                    sender = f" (от {origin.sender_user_name})"
+                # MessageOriginChat
+                elif hasattr(origin, "sender_chat") and origin.sender_chat:
+                    sender = f" (из {origin.sender_chat.title})"
+            # Fallback на старые поля
+            if not sender:
+                if getattr(update.message, "forward_from", None):
+                    sender = f" (от {update.message.forward_from.full_name})"
+                elif getattr(update.message, "forward_sender_name", None):
+                    sender = f" (от {update.message.forward_sender_name})"
             await update.message.reply_text(f"Текст голосового{sender}:\n\n{transcript}")
             return
 
