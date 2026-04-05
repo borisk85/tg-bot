@@ -2886,6 +2886,25 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Не удалось распознать голосовое сообщение.")
             return
 
+        # Пост-обработка транскрипта через Claude Haiku — исправляет ошибки Whisper
+        try:
+            import anthropic as _anthropic
+            _cleanup_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            _cleanup_resp = _cleanup_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": (
+                    "Исправь ошибки автоматической транскрипции русской речи: "
+                    "расставь знаки препинания, исправь явные ошибки распознавания "
+                    "(имена, технические термины, названия ИИ-моделей и продуктов). "
+                    "Верни только исправленный текст, без пояснений.\n\n"
+                    f"Текст:\n{transcript}"
+                )}]
+            )
+            transcript = _cleanup_resp.content[0].text.strip()
+        except Exception as _e:
+            logger.warning(f"Transcript cleanup failed: {_e}")
+
         user_id = update.effective_user.id
         logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
 
