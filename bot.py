@@ -2220,8 +2220,8 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         user_content = user_text
     history.append({"role": "user", "content": user_content})
 
-    if len(history) > 30:
-        history = history[-30:]
+    if len(history) > 60:
+        history = history[-60:]
         # Убираем осиротевшие tool_result в начале истории:
         # если первое сообщение — user с tool_result блоками без предшествующего tool_use
         while history and history[0]["role"] == "user":
