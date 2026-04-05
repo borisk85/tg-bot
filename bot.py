@@ -2930,7 +2930,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async def send_photo(url: str):
             await update.message.reply_photo(photo=url)
 
-        reply = await run_agent(user_id, f"🎤 {transcript}", image_data, send_photo=send_photo)
+        transcript_with_context = f"🎤 {transcript}"
+        reply_to = update.message.reply_to_message
+        if reply_to:
+            reply_text = reply_to.text or reply_to.caption or ""
+            if reply_text:
+                if len(reply_text) > 500:
+                    reply_text = reply_text[:500] + "..."
+                transcript_with_context = f"[Отвечает на сообщение: «{reply_text}»]\n{transcript_with_context}"
+
+        reply = await run_agent(user_id, transcript_with_context, image_data, send_photo=send_photo)
         await _send_reply(reply, update.message)
 
     except Exception as e:
@@ -2941,6 +2950,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
+
+    # Если пользователь отвечает на конкретное сообщение — добавляем контекст
+    reply_to = update.message.reply_to_message
+    if reply_to:
+        reply_text = reply_to.text or reply_to.caption or ""
+        if reply_text:
+            if len(reply_text) > 500:
+                reply_text = reply_text[:500] + "..."
+            user_text = f"[Отвечает на сообщение: «{reply_text}»]\n{user_text}"
+
     image_data = None
 
     # Загрузка файла в Drive если caption содержит "в drive" / "в драйв"
