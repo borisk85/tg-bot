@@ -839,6 +839,17 @@ TOOLS = [
         }
     },
     {
+        "name": "tasks_delete_all",
+        "description": "Удаляет ВСЕ задачи из списка Google Tasks. Используй когда пользователь просит 'очисти список', 'удали все задачи', 'очисти задачи'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tasklist": {"type": "string", "description": "Название списка (необязательно — если не указан, удаляет из всех списков)"}
+            },
+            "required": []
+        }
+    },
+    {
         "name": "tasks_complete",
         "description": "Отмечает задачу как выполненную.",
         "input_schema": {
@@ -1983,6 +1994,25 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                         service.tasks().delete(tasklist=tl["id"], task=t["id"]).execute()
                         return f"Удалено: «{t['title']}»"
             return f"Задача «{tool_input['title']}» не найдена."
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "tasks_delete_all":
+        try:
+            service = get_tasks_service()
+            lists = service.tasklists().list().execute().get("items", [])
+            tasklist_name = tool_input.get("tasklist", "").lower()
+            deleted = []
+            for tl in lists:
+                if tasklist_name and tasklist_name not in tl["title"].lower():
+                    continue
+                tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                for t in tasks:
+                    service.tasks().delete(tasklist=tl["id"], task=t["id"]).execute()
+                    deleted.append(f"«{t['title']}»")
+            if not deleted:
+                return "Задач не найдено."
+            return f"Удалено {len(deleted)} задач: {', '.join(deleted)}"
         except Exception as e:
             return f"Ошибка: {e}"
 
