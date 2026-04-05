@@ -3006,10 +3006,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         # Сохраняем фото как вложение — может понадобиться для gmail_send
         _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": "photo.jpg", "mime": "image/jpeg"}
-        # Если фото без подписи — сохраняем и ждём команды
+        # Если фото без подписи — смотрим есть ли активный диалог
         if not user_text:
-            await update.message.reply_text("📎 Фото сохранено.")
-            return
+            if not get_history(user_id):
+                # Нет диалога — ждём команды (Drive, Gmail и т.д.)
+                await update.message.reply_text("📎 Фото сохранено.")
+                return
+            # Есть диалог — передаём фото как продолжение разговора
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
     elif update.message.document:
         tg_file = await context.bot.get_file(update.message.document.file_id)
