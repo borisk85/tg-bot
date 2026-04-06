@@ -3023,8 +3023,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_text = f"{user_text} [image_url:{uploaded}]"
             except Exception:
                 pass
-        # Сохраняем фото как вложение — может понадобиться для gmail_send
-        _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": "photo.jpg", "mime": "image/jpeg"}
+        # Добавляем фото в буфер вложений (накапливаем список, не перезаписываем)
+        new_att = {"bytes": bytes(file_bytes), "filename": "photo.jpg", "mime": "image/jpeg"}
+        existing = _pending_attachments.get(user_id)
+        if existing is None:
+            _pending_attachments[user_id] = new_att
+        elif isinstance(existing, list):
+            new_att["filename"] = f"photo_{len(existing)+1}.jpg"
+            _pending_attachments[user_id].append(new_att)
+        else:
+            new_att["filename"] = "photo_2.jpg"
+            _pending_attachments[user_id] = [existing, new_att]
         # Если фото без подписи — смотрим есть ли активный диалог
         if not user_text:
             if not get_history(user_id):
