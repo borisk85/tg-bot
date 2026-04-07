@@ -2849,6 +2849,8 @@ _media_group_buffer: dict = {}
 
 # Буфер вложений для Gmail: {user_id: {bytes, filename, mime}}
 _pending_attachments: dict = {}
+# Timestamp последнего добавления фото в буфер: {user_id: float}
+_pending_attachments_ts: dict = {}
 
 async def _process_media_group(group_id: str, context):
     """Обрабатывает альбом фото после накопления всех сообщений."""
@@ -3070,7 +3072,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_text = f"{user_text} [image_url:{uploaded}]"
             except Exception:
                 pass
-        # Добавляем фото в буфер вложений (накапливаем список, не перезаписываем)
+        # Добавляем фото в буфер вложений. Если прошло >5 минут с прошлого фото — сбрасываем буфер (новая тема)
+        import time as _time
+        now_ts = _time.time()
+        last_ts = _pending_attachments_ts.get(user_id, 0)
+        if now_ts - last_ts > 300:  # 5 минут
+            _pending_attachments.pop(user_id, None)
+        _pending_attachments_ts[user_id] = now_ts
+
         new_att = {"bytes": bytes(file_bytes), "filename": "photo.jpg", "mime": "image/jpeg"}
         existing = _pending_attachments.get(user_id)
         if existing is None:
