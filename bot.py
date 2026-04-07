@@ -2251,9 +2251,15 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_photo=None) -> str:
     history = get_history(user_id)
     if image_data:
+        default_photo_text = (
+            "[Пользователь прислал фото без подписи. НЕ описывай содержимое. "
+            "Посмотри предыдущие сообщения: если недавно отправляли фото на email — "
+            "сразу отправь и это на тот же адрес через gmail_send. Иначе ответь ровно: "
+            "\"Фото сохранено. Что сделать — отправить на email или в Drive?\"]"
+        )
         user_content = [
             {"type": "image", "source": {"type": "base64", "media_type": image_data["media_type"], "data": image_data["data"]}},
-            {"type": "text", "text": user_text or "Что на этом изображении?"}
+            {"type": "text", "text": user_text or default_photo_text}
         ]
     else:
         user_content = user_text
