@@ -2883,15 +2883,23 @@ async def _process_media_group(group_id: str, context):
             await _upload_to_drive(photo_bytes, fname, "image/jpeg", update, context, folder_id=folder_id)
         return
 
-    # Не Drive-загрузка — отправляем в агент только первое фото (как раньше)
-    import base64
-    image_data = {"media_type": "image/jpeg", "data": base64.b64encode(photos[0]).decode()}
-    user_text = caption
-    # Сохраняем ВСЕ фото альбома в буфер для gmail_send
+    # Не Drive-загрузка — сохраняем ВСЕ фото альбома в буфер для gmail_send
+    import time as _time
     _pending_attachments[user_id] = [
         {"bytes": bytes(p), "filename": f"photo_{i+1}.jpg" if len(photos) > 1 else "photo.jpg", "mime": "image/jpeg"}
         for i, p in enumerate(photos)
     ]
+    _pending_attachments_ts[user_id] = _time.time()
+
+    # Альбом без подписи — программный ответ без LLM
+    if not caption:
+        await update.message.reply_text(f"📎 Сохранено {len(photos)} фото. Что сделать — отправить на email или в Drive?")
+        return
+
+    # Альбом с подписью — передаём первое фото в агент
+    import base64
+    image_data = {"media_type": "image/jpeg", "data": base64.b64encode(photos[0]).decode()}
+    user_text = caption
 
     async def send_photo(url: str):
         await update.message.reply_photo(photo=url)
@@ -3090,13 +3098,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             new_att["filename"] = "photo_2.jpg"
             _pending_attachments[user_id] = [existing, new_att]
-        # Если фото без подписи — смотрим есть ли активный диалог
+        # Фото без подписи — НИКОГДА не гоним через LLM. Всегда программный ответ.
+        # Если нужен анализ — пользователь добавит подпись "что тут", "опиши" и т.п.
         if not user_text:
-            if not get_history(user_id):
-                # Нет диалога — ждём команды (Drive, Gmail и т.д.)
-                await update.message.reply_text("📎 Фото сохранено.")
-                return
-            # Есть диалог — передаём фото как продолжение разговора
+            await update.message.reply_text("📎 Фото сохранено. Что сделать — отправить на email или в Drive?")
+            return
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
     elif update.message.document:
         tg_file = await context.bot.get_file(update.message.document.file_id)
