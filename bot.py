@@ -2993,15 +2993,24 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Текст голосового{sender}:\n\n{transcript}")
             return
 
-        # Если перед голосовым было сохранено фото — передаём его в агент
+        # TTL для pending_attachments: чистим устаревшее
+        import time as _time2
+        if user_id in _pending_attachments_ts:
+            if _time2.time() - _pending_attachments_ts[user_id] > 300:
+                _pending_attachments.pop(user_id, None)
+                _pending_attachments_ts.pop(user_id, None)
+
+        # Подцепляем сохранённое фото к голосовому ТОЛЬКО если в транскрипте есть явное упоминание
         import base64 as _b64
-        pending = _pending_attachments.get(user_id)
-        if isinstance(pending, list):
-            pending = pending[0] if pending else None
         image_data = None
-        if pending and pending.get("mime", "").startswith("image/"):
-            _pending_attachments.pop(user_id, None)
-            image_data = {"media_type": pending["mime"], "data": _b64.b64encode(pending["bytes"]).decode()}
+        photo_keywords = ["фото", "скриншот", "картин", "изображен", "снимк", "опиши", "что на", "что тут", "что здесь", "проанализируй"]
+        if any(kw in transcript.lower() for kw in photo_keywords):
+            pending = _pending_attachments.get(user_id)
+            if isinstance(pending, list):
+                pending = pending[0] if pending else None
+            if pending and pending.get("mime", "").startswith("image/"):
+                _pending_attachments.pop(user_id, None)
+                image_data = {"media_type": pending["mime"], "data": _b64.b64encode(pending["bytes"]).decode()}
 
         async def send_photo(url: str):
             await update.message.reply_photo(photo=url)
@@ -3026,6 +3035,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
+
+    # TTL для pending_attachments: если буфер старше 5 минут — чистим, чтобы старые фото не подтягивались
+    import time as _time
+    if user_id in _pending_attachments_ts:
+        if _time.time() - _pending_attachments_ts[user_id] > 300:
+            _pending_attachments.pop(user_id, None)
+            _pending_attachments_ts.pop(user_id, None)
 
     # Если пользователь отвечает на конкретное сообщение — добавляем контекст
     reply_to = update.message.reply_to_message
