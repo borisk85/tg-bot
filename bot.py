@@ -1594,7 +1594,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         memories = get_user_memory(user_id)
         if not memories:
             return "Долгосрочная память пуста."
-        lines = [f"• {m['key']}: {m['value']}" for m in memories]
+        lines = [f"✅ {m['key']}: {m['value']}" for m in memories]
         return "Что я о тебе знаю:\n" + "\n".join(lines)
 
     if name == "memory_delete":
@@ -2772,7 +2772,7 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not memories:
         await update.message.reply_text("Долгосрочная память пуста.")
         return
-    lines = [f"• {m['key']}: {m['value']}" for m in memories]
+    lines = [f"✅ {m['key']}: {m['value']}" for m in memories]
     await update.message.reply_text("Что я о тебе знаю:\n" + "\n".join(lines))
 
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
