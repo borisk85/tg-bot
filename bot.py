@@ -2910,10 +2910,16 @@ async def _process_media_group(group_id: str, context):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
-        reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
+        reply = await asyncio.wait_for(
+            run_agent(user_id, user_text, image_data, send_photo=send_photo),
+            timeout=120
+        )
         await _send_reply(reply, update.message)
+    except asyncio.TimeoutError:
+        logger.error(f"run_agent TIMEOUT (120s) for user {user_id} (media_group)")
+        await update.message.reply_text("Запрос занял слишком долго — попробуй ещё раз.")
     except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
+        logger.error(f"Error for user {user_id}: {e}", exc_info=True)
         from anthropic import OverloadedError as _OverloadedError
         if isinstance(e, _OverloadedError):
             await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
@@ -3028,9 +3034,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_text = reply_text[:500] + "..."
                 transcript_with_context = f"[Отвечает на сообщение: «{reply_text}»]\n{transcript_with_context}"
 
-        reply = await run_agent(user_id, transcript_with_context, image_data, send_photo=send_photo)
+        reply = await asyncio.wait_for(
+            run_agent(user_id, transcript_with_context, image_data, send_photo=send_photo),
+            timeout=120
+        )
         await _send_reply(reply, update.message)
 
+    except asyncio.TimeoutError:
+        logger.error(f"run_agent TIMEOUT (120s) for user {user_id} (voice)")
+        await update.message.reply_text("Запрос занял слишком долго — попробуй ещё раз.")
     except Exception as e:
         logger.error(f"handle_voice error: {e}", exc_info=True)
         await update.message.reply_text(f"Ошибка голосового: {type(e).__name__}: {e}")
@@ -3170,10 +3182,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(photo=url)
 
     try:
-        reply = await run_agent(user_id, user_text, image_data, send_photo=send_photo)
+        reply = await asyncio.wait_for(
+            run_agent(user_id, user_text, image_data, send_photo=send_photo),
+            timeout=120
+        )
         await _send_reply(reply, update.message)
+    except asyncio.TimeoutError:
+        logger.error(f"run_agent TIMEOUT (120s) for user {user_id}, text: {user_text[:100]}")
+        await update.message.reply_text("Запрос занял слишком долго — попробуй ещё раз.")
     except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
+        logger.error(f"Error for user {user_id}: {e}", exc_info=True)
         from anthropic import OverloadedError as _OverloadedError
         if isinstance(e, _OverloadedError):
             await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
