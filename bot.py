@@ -2205,14 +2205,17 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         try:
             api_key = os.getenv("FIRECRAWL_API_KEY")
             if not api_key:
+                logger.error("read_webpage: FIRECRAWL_API_KEY не задан в env")
                 return "FIRECRAWL_API_KEY не задан."
             url = tool_input["url"]
+            logger.info(f"read_webpage: запрос к Firecrawl для {url}, ключ ...{api_key[-4:]}")
             resp = requests.post(
                 "https://api.firecrawl.dev/v1/scrape",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"url": url, "formats": ["markdown"]},
                 timeout=30
             )
+            logger.info(f"read_webpage: статус {resp.status_code}, тело: {resp.text[:300]}")
             data = resp.json()
             if not data.get("success"):
                 return f"Не удалось прочитать страницу: {data.get('error', resp.status_code)}"
@@ -2221,6 +2224,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 return "Страница загрузилась, но контент пустой."
             return content[:8000]
         except Exception as e:
+            logger.error(f"read_webpage: исключение — {e}")
             return f"Ошибка: {e}"
 
     if name == "search_flights":
