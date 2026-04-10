@@ -388,6 +388,54 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 /myid — Telegram ID
 /ai_agents_digest — запустить конкурентный радар по ИИ-агентам и ботам прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
 
+# ── Weather helpers ───────────────────────────────────────────────────────────
+
+def _weather_icon(desc: str) -> str:
+    d = desc.lower()
+    if any(w in d for w in ("гроза", "thunderstorm")):
+        return "⛈"
+    if any(w in d for w in ("ливень", "сильный дождь", "heavy rain")):
+        return "🌧"
+    if any(w in d for w in ("дождь", "морось", "rain", "drizzle")):
+        return "🌦"
+    if any(w in d for w in ("метель", "вьюга", "blizzard", "снег", "snow")):
+        return "🌨"
+    if any(w in d for w in ("туман", "fog", "mist")):
+        return "🌫"
+    if any(w in d for w in ("пасмурно", "облачно", "overcast", "broken clouds")):
+        return "☁️"
+    if any(w in d for w in ("переменная облачность", "scattered clouds", "few clouds", "малооблачно")):
+        return "⛅"
+    if any(w in d for w in ("ясно", "clear")):
+        return "☀️"
+    return "🌡"
+
+def _weather_tip(desc: str, temp: float, wind: float) -> str:
+    d = desc.lower()
+    if any(w in d for w in ("гроза", "thunderstorm")):
+        return "Лучше остаться дома — гроза ⛈"
+    if any(w in d for w in ("ливень", "сильный дождь", "heavy rain")):
+        return "Возьми зонт, ожидается сильный дождь 🌂"
+    if any(w in d for w in ("дождь", "морось", "rain", "drizzle")):
+        return "Возьми зонт ☂️"
+    if any(w in d for w in ("метель", "вьюга", "blizzard")):
+        return "Метель — оденься тепло и будь осторожен на дорогах 🌨"
+    if any(w in d for w in ("снег", "snow")):
+        return "Снег — оденься теплее 🧥"
+    if any(w in d for w in ("туман", "fog", "mist")):
+        return "Туман — осторожно на дорогах 🌫"
+    if wind >= 15:
+        return "Сильный ветер — держи шляпу 💨"
+    if temp <= -15:
+        return "Очень холодно — одевайся максимально тепло 🧥"
+    if temp <= 0:
+        return "Ниже нуля — оденься теплее 🧥"
+    if temp >= 35:
+        return "Сильная жара — пей больше воды 🌡"
+    if temp >= 28:
+        return "Жарко — не забудь воду ☀️"
+    return ""
+
 # ── Tool definitions ──────────────────────────────────────────────────────────
 
 TOOLS = [
@@ -811,7 +859,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "city": {"type": "string", "description": "Название города (например: Алматы, Москва, London)"},
-                "forecast_days": {"type": "integer", "description": "Прогноз на N дней (0 = только сейчас, максимум 5)"}
+                "forecast_days": {"type": "integer", "description": "Сколько дней прогноза показать (1-5). 0 или не указано = только текущая погода"},
+                "skip_days": {"type": "integer", "description": "Сколько дней пропустить от завтра. 'послезавтра' = skip_days=1, days=1. 'через 3 дня' = skip_days=2, days=1"}
             },
             "required": ["city"]
         }
@@ -1861,43 +1910,74 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             city = tool_input["city"]
             api_key = os.getenv("OPENWEATHER_API_KEY")
             forecast_days = tool_input.get("forecast_days", 0)
+            skip_days = tool_input.get("skip_days", 0)
 
-            # Текущая погода
+            base_params = {"q": city, "appid": api_key, "units": "metric", "lang": "ru"}
+
+            # Текущая погода (нужна всегда — для города и для fallback)
             resp = requests.get(
                 "https://api.openweathermap.org/data/2.5/weather",
-                params={"q": city, "appid": api_key, "units": "metric", "lang": "ru"}
+                params=base_params, timeout=10
             )
-            data = resp.json()
+            if resp.status_code == 404:
+                return f"Город «{city}» не найден."
             if resp.status_code != 200:
-                return f"Город не найден: {city}"
+                return "Ошибка получения погоды."
 
+            data = resp.json()
+            city_name = data.get("name", city)
             desc = data["weather"][0]["description"].capitalize()
             temp = data["main"]["temp"]
             feels = data["main"]["feels_like"]
             humidity = data["main"]["humidity"]
             wind = data["wind"]["speed"]
-            result = f"🌤 {city}\n{desc}, {temp:.0f}°C (ощущается {feels:.0f}°C)\nВлажность: {humidity}%, Ветер: {wind} м/с"
+            icon = _weather_icon(desc)
 
             if forecast_days and forecast_days > 0:
+                # Прогноз — показываем ТОЛЬКО прогноз без текущей погоды
                 resp2 = requests.get(
                     "https://api.openweathermap.org/data/2.5/forecast",
-                    params={"q": city, "appid": api_key, "units": "metric", "lang": "ru", "cnt": forecast_days * 8}
+                    params={**base_params, "cnt": 40}, timeout=10
                 )
-                forecast = resp2.json()
-                seen_dates = set()
+                today = now_local().strftime("%Y-%m-%d")
+                day_data = {}
+                for item in resp2.json().get("list", []):
+                    d = item["dt_txt"][:10]
+                    hour = int(item["dt_txt"][11:13])
+                    if d == today or hour < 7 or hour > 21:
+                        continue
+                    t = item["main"]["temp"]
+                    desc2 = item["weather"][0]["description"]
+                    pop = item.get("pop", 0)
+                    if d not in day_data:
+                        day_data[d] = {"temps": [], "desc": desc2, "pop": pop}
+                    day_data[d]["temps"].append(t)
+                    if pop > day_data[d]["pop"]:
+                        day_data[d]["pop"] = pop
+                        day_data[d]["desc"] = desc2
+                sorted_days = sorted(day_data.items())
+                if skip_days and skip_days > 0:
+                    sorted_days = sorted_days[skip_days:]
                 forecast_lines = []
-                for item in forecast.get("list", []):
-                    date = item["dt_txt"][:10]
-                    if date not in seen_dates and date != now_local().strftime("%Y-%m-%d"):
-                        seen_dates.add(date)
-                        t = item["main"]["temp"]
-                        d = item["weather"][0]["description"]
-                        forecast_lines.append(f"• {date}: {t:.0f}°C, {d}")
-                    if len(seen_dates) >= forecast_days:
-                        break
+                for d, info in sorted_days[:forecast_days]:
+                    t_min = min(info["temps"])
+                    t_max = max(info["temps"])
+                    icon2 = _weather_icon(info["desc"])
+                    forecast_lines.append(f"{d}: {icon2} {t_min:.0f}–{t_max:.0f}°C, {info['desc']}")
                 if forecast_lines:
-                    result += "\n\nПрогноз:\n" + "\n".join(forecast_lines)
+                    return f"Прогноз для {city_name}:\n\n" + "\n".join(forecast_lines)
+                return f"Не удалось получить прогноз для {city_name}."
 
+            # Текущая погода (forecast_days == 0)
+            result = (
+                f"{icon} {city_name}\n"
+                f"{temp:.0f}°C, ощущается {feels:.0f}°C\n"
+                f"{desc}\n"
+                f"Влажность {humidity}%, ветер {wind:.0f} м/с"
+            )
+            tip = _weather_tip(desc, temp, wind)
+            if tip:
+                result += f"\n{tip}"
             return result
         except Exception as e:
             return f"Ошибка: {e}"
@@ -2567,17 +2647,18 @@ async def send_morning_digest(context):
         try:
             api_key = os.getenv("OPENWEATHER_API_KEY")
             resp = requests.get("https://api.openweathermap.org/data/2.5/weather",
-                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru"})
+                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru"}, timeout=10)
             w = resp.json()
             desc = w["weather"][0]["description"].capitalize()
             temp = w["main"]["temp"]
             feels = w["main"]["feels_like"]
             wind = w["wind"]["speed"]
-            lines.append(f"Погода: {desc}, {temp:.0f}C (ощущается {feels:.0f}C), ветер {wind:.0f} м/с")
+            icon = _weather_icon(desc)
+            lines.append(f"{icon} Погода: {desc}, {temp:.0f}°C (ощущается {feels:.0f}°C), ветер {wind:.0f} м/с")
 
             # Прогноз на день — мин/макс и осадки
             resp2 = requests.get("https://api.openweathermap.org/data/2.5/forecast",
-                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8})
+                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8}, timeout=10)
             forecast = resp2.json()
             # Только дневные интервалы 7:00–21:00
             day_items = [i for i in forecast["list"]
@@ -2598,7 +2679,10 @@ async def send_morning_digest(context):
                 for i in day_items
             )
             precip = "Ожидается дождь, зонт пригодится." if rain else ("Ожидается снег." if snow else "Осадков не ожидается.")
-            lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}C. {precip}")
+            lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}°C. {precip}")
+            tip = _weather_tip(desc, temp, wind)
+            if tip:
+                lines.append(tip)
             lines.append("")
         except:
             pass
