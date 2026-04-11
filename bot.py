@@ -714,12 +714,13 @@ TOOLS = [
     },
     {
         "name": "reminder_cancel",
-        "description": "Отменяет напоминание. Можно указать index (номер из reminder_list, начиная с 1) ИЛИ text (часть текста напоминания для поиска). Если пользователь говорит 'убери предыдущее' или называет текст — используй text. Если есть сомнения — сначала вызови reminder_list.",
+        "description": "Отменяет напоминание. Три способа поиска (любой один): index (номер из reminder_list), text (часть текста), time (время срабатывания, формат HH:MM или YYYY-MM-DDTHH:MM). Пример: 'удали напоминание в 10 утра' → time='10:00'. Если сомнения — сначала reminder_list.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Номер напоминания из reminder_list (начиная с 1)"},
-                "text": {"type": "string", "description": "Часть текста напоминания для поиска (если не знаешь индекс)"}
+                "text": {"type": "string", "description": "Часть текста напоминания для поиска (если не знаешь индекс)"},
+                "time": {"type": "string", "description": "Время срабатывания напоминания (HH:MM или YYYY-MM-DDTHH:MM). 'удали в 10 утра' → time='10:00'"}
             }
         }
     },
@@ -1551,7 +1552,19 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             if not active:
                 return "Нет активных напоминаний."
             real_idx, r = None, None
-            if "text" in tool_input and tool_input["text"]:
+            if "time" in tool_input and tool_input["time"]:
+                search_time = tool_input["time"]
+                user_tz = get_user_tz(user_id)
+                for i, rem in active:
+                    rem_dt = datetime.fromisoformat(rem["at"]).astimezone(user_tz)
+                    rem_hm = rem_dt.strftime("%H:%M")
+                    rem_full = rem_dt.strftime("%Y-%m-%dT%H:%M")
+                    if search_time in (rem_hm, rem_full):
+                        real_idx, r = i, rem
+                        break
+                if real_idx is None:
+                    return f"Напоминание на время '{search_time}' не найдено."
+            elif "text" in tool_input and tool_input["text"]:
                 search = tool_input["text"].lower()
                 for i, rem in active:
                     if search in rem["text"].lower():
