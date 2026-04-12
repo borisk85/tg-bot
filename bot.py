@@ -2971,9 +2971,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Команды:\n"
         "/start — полный список возможностей бота\n"
         "/memory — что бот знает обо мне\n"
-        "/clear — очистить историю диалога\n"
         "/timezone — сменить часовой пояс\n"
         "/ai_agents_digest — конкурентный радар по ИИ-ботам\n"
+        "/clear — очистить историю диалога\n"
         "/myid — мой Telegram ID"
     )
 
