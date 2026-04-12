@@ -2969,12 +2969,12 @@ async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Команды:\n"
-        "/start — полный список возможностей\n"
-        "/memory — что бот знает о тебе\n"
+        "/start — полный список возможностей бота\n"
+        "/memory — что бот знает обо мне\n"
         "/clear — очистить историю диалога\n"
         "/timezone — сменить часовой пояс\n"
         "/ai_agents_digest — конкурентный радар по ИИ-ботам\n"
-        "/myid — твой Telegram ID"
+        "/myid — мой Telegram ID"
     )
 
 async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context, folder_id: str = None):
