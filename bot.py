@@ -170,6 +170,19 @@ def set_morning_digest(user_id: int, enabled: bool):
     if redis_client:
         redis_client.set(f"digest_morning:{user_id}", "on" if enabled else "off")
 
+def get_digest_time(user_id: int) -> tuple:
+    """Возвращает (hour, minute) для утреннего дайджеста. По умолчанию 11:00."""
+    if redis_client:
+        v = redis_client.get(f"digest_time:{user_id}")
+        if v:
+            parts = v.split(":")
+            return int(parts[0]), int(parts[1])
+    return 11, 0
+
+def set_digest_time(user_id: int, hour: int, minute: int):
+    if redis_client:
+        redis_client.set(f"digest_time:{user_id}", f"{hour}:{minute:02d}")
+
 def serialize_messages(messages: list) -> list:
     """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
     result = []
@@ -754,7 +767,7 @@ TOOLS = [
     },
     {
         "name": "morning_digest_toggle",
-        "description": "Включает или отключает утренний дайджест (погода, события, задачи в 11:00). Используй когда пользователь просит 'отключи дайджест', 'не присылай больше', 'верни дайджест', 'включи обратно'. ОБЯЗАТЕЛЬНО вызови этот инструмент — нельзя просто сказать что отключил, не вызвав его.",
+        "description": "Включает или отключает утренний дайджест (погода, события, задачи). Используй когда пользователь просит 'отключи дайджест', 'не присылай больше', 'верни дайджест', 'включи обратно'. ОБЯЗАТЕЛЬНО вызови этот инструмент — нельзя просто сказать что отключил, не вызвав его.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -765,8 +778,20 @@ TOOLS = [
     },
     {
         "name": "morning_digest_status",
-        "description": "Показывает текущий статус утреннего дайджеста (включён или отключён).",
+        "description": "Показывает текущий статус утреннего дайджеста (включён/отключён и время).",
         "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "morning_digest_set_time",
+        "description": "Устанавливает время утреннего дайджеста. 'присылай дайджест в 8 утра' → hour=8, minute=0.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hour": {"type": "integer", "description": "Час (0-23)"},
+                "minute": {"type": "integer", "description": "Минуты (0-59), по умолчанию 0"}
+            },
+            "required": ["hour"]
+        }
     },
     {
         "name": "alert_price_set",
@@ -1672,10 +1697,20 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     if name == "morning_digest_toggle":
         enabled = bool(tool_input.get("enabled"))
         set_morning_digest(user_id, enabled)
-        return "Утренний дайджест включён — буду присылать в 11:00." if enabled else "Утренний дайджест отключён — больше не буду присылать в 11:00."
+        h, m = get_digest_time(user_id)
+        return f"Утренний дайджест включён ({h}:{m:02d})." if enabled else "Утренний дайджест отключён."
 
     if name == "morning_digest_status":
-        return "Утренний дайджест: включён (приходит в 11:00)." if is_morning_digest_enabled(user_id) else "Утренний дайджест: отключён."
+        h, m = get_digest_time(user_id)
+        return f"Утренний дайджест: включён ({h}:{m:02d})." if is_morning_digest_enabled(user_id) else "Утренний дайджест: отключён."
+
+    if name == "morning_digest_set_time":
+        hour = tool_input["hour"]
+        minute = tool_input.get("minute", 0)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            return "Некорректное время."
+        set_digest_time(user_id, hour, minute)
+        return f"Время дайджеста изменено на {hour}:{minute:02d}."
 
     if name == "alert_price_set":
         try:
@@ -2648,10 +2683,24 @@ async def send_weekly_ai_digest(context):
         await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка недельного дайджеста: {e}")
 
 
-async def send_morning_digest(context):
+_digest_sent_today = {}
+
+async def check_morning_digest(context):
     user_id = 661638470
     if not is_morning_digest_enabled(user_id):
         return
+    user_tz = get_user_tz(user_id)
+    now = datetime.now(user_tz)
+    today = now.strftime("%Y-%m-%d")
+    if _digest_sent_today.get(user_id) == today:
+        return
+    h, m = get_digest_time(user_id)
+    if now.hour == h and now.minute >= m:
+        _digest_sent_today[user_id] = today
+        await send_morning_digest(context)
+
+async def send_morning_digest(context):
+    user_id = 661638470
     try:
         now = now_local()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -2811,13 +2860,41 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text(
         "Привет! Вот что я умею:\n\n"
-        "📅 Календарь и задачи\n"
-        "📬 Почта и файлы\n"
-        "💰 Финансы\n"
-        "🔍 Инфо и поиск\n"
-        "🎨 Генерация изображений\n"
-        "🧠 Память\n"
-        "⚙️ Автоматические дайджесты\n\n"
+        "📅 Google Calendar\n"
+        "— создать, посмотреть, удалить события\n\n"
+        "📋 Google Tasks\n"
+        "— создать, посмотреть, удалить задачи\n\n"
+        "⏰ Напоминания\n"
+        "— напомнить о чем-либо в нужное время\n\n"
+        "🔔 Ценовые уведомления\n"
+        "— напомнить когда нужный актив достигнет определенной цены\n\n"
+        "📧 Gmail\n"
+        "— поиск, чтение, отправка, удаление, корзина, спам, отписка\n\n"
+        "🗂 Google Drive\n"
+        "— поиск, чтение, создание документов/таблиц/папок\n\n"
+        "💱 Криптовалюты и валюты\n"
+        "— курс любой криптовалюты или фиатной пары\n\n"
+        "📊 Акции, индексы, драгметаллы и сырье\n\n"
+        "🌤 Погода\n"
+        "— сейчас и прогноз до 5 дней\n\n"
+        "🔍 Поиск в интернете\n\n"
+        "📖 Чтение сайтов\n"
+        "— открою ссылку и перескажу содержимое\n\n"
+        "📸 Анализ фото\n"
+        "— опишу и отвечу на вопросы по фото\n\n"
+        "🍽 Анализ калорий по фото\n"
+        "— подсчет ккал по фото еды или блюда\n\n"
+        "✈️ Авиабилеты\n"
+        "— поиск цен на рейсы в нужные даты по всему миру\n\n"
+        "🎨 Генерация изображений\n\n"
+        "🧠 Долгосрочная память\n"
+        "— помню факты из бесед между сессиями\n\n"
+        "🌅 Утренний дайджест\n"
+        "— погода, события и задачи на день\n\n"
+        "📰 Конкурентный радар\n"
+        "— обзор рынка ИИ-ботов раз в неделю\n\n"
+        "📄 Документы\n"
+        "— PDF, Word, текстовые файлы\n\n"
         "Команды: /memory /clear /timezone /ai_agents_digest"
     )
 
@@ -3287,7 +3364,7 @@ def main():
     app.job_queue.run_repeating(check_reminders, interval=60, first=10)
     app.job_queue.run_repeating(check_price_alerts, interval=300, first=30)
     import datetime as dt
-    app.job_queue.run_daily(send_morning_digest, time=dt.time(hour=11, minute=0, tzinfo=TZ))
+    app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
