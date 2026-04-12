@@ -2908,8 +2908,7 @@ async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Расскажи о себе — запомню навсегда.\n\n"
             "Пиши в свободной форме, например:\n"
-            "Меня зовут Борис, 38 лет, живу в Алматы, строю SaaS для Telegram-ботов, слежу за BTC и ETH, занимаюсь биохакингом\n\n"
-            "Используй: /about [текст о себе]"
+            "Меня зовут Борис, 38 лет, живу в Алматы, строю SaaS для Telegram-ботов, слежу за BTC и ETH, занимаюсь биохакингом"
         )
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
