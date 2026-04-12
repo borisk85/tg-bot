@@ -398,7 +398,6 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Команды бота:
 /clear — очистить историю
-/help — список возможностей
 /myid — Telegram ID
 /ai_agents_digest — запустить конкурентный радар по ИИ-агентам и ботам прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
 
@@ -2964,16 +2963,6 @@ async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Используй стандартные названия: Europe/Moscow, Asia/Almaty, America/New_York и т.д."
         )
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Команды:\n"
-        "/start — полный список возможностей бота\n"
-        "/memory — что бот знает обо мне\n"
-        "/timezone — сменить часовой пояс\n"
-        "/ai_agents_digest — конкурентный радар по ИИ-ботам\n"
-        "/clear — очистить историю диалога\n"
-        "/myid — мой Telegram ID"
-    )
 
 async def _upload_to_drive(file_bytes: bytes, filename: str, mime: str, update, context, folder_id: str = None):
     try:
@@ -3365,7 +3354,6 @@ def main():
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
@@ -3380,7 +3368,6 @@ def main():
     async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Начать"),
-            BotCommand("help", "Список команд"),
             BotCommand("clear", "Очистить историю чата"),
             BotCommand("myid", "Мой Telegram ID"),
             BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
