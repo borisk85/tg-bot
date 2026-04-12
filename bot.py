@@ -2894,8 +2894,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📰 Конкурентный радар\n"
         "— обзор рынка ИИ-ботов раз в неделю\n\n"
         "📄 Документы\n"
-        "— PDF, Word, текстовые файлы\n\n"
-        "Команды: /memory /clear /timezone /ai_agents_digest"
+        "— PDF, Word, текстовые файлы"
     )
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
