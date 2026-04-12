@@ -3381,7 +3381,7 @@ def main():
     async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Начать"),
-            BotCommand("help", "Список возможностей"),
+            BotCommand("help", "Список команд"),
             BotCommand("clear", "Очистить историю чата"),
             BotCommand("myid", "Мой Telegram ID"),
             BotCommand("ai_agents_digest", "Конкурентный радар по ИИ-ботам"),
