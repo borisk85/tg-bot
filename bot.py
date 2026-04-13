@@ -1992,7 +1992,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 for item in resp2.json().get("list", []):
                     d = item["dt_txt"][:10]
                     hour = int(item["dt_txt"][11:13])
-                    if d == today or hour < 7 or hour > 21:
+                    if hour < 7 or hour > 21:
                         continue
                     t = item["main"]["temp"]
                     desc2 = item["weather"][0]["description"]
