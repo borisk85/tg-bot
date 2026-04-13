@@ -2706,8 +2706,10 @@ async def check_morning_digest(context):
         _digest_sent_today[user_id] = today
         await send_morning_digest(context)
 
-async def send_morning_digest(context):
+async def send_morning_digest(context, force=False):
     user_id = 661638470
+    if not force and not is_morning_digest_enabled(user_id):
+        return
     try:
         now = now_local()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -2941,6 +2943,9 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_morning_digest(context, force=True)
 
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
@@ -3365,6 +3370,7 @@ def main():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
+    app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
