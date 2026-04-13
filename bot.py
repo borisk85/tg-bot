@@ -2804,6 +2804,28 @@ async def send_morning_digest(context, force=False):
         except:
             pass
 
+        # Демо-блоки для скриншота (временно)
+        if force:
+            if not any("Событи" in l for l in lines):
+                lines.append("События:")
+                lines.append("• 10:00 — Созвон с командой")
+                lines.append("• 14:00 — Встреча с инвестором")
+                lines.append("• 18:00 — Теннис")
+                lines.append("")
+            if not any("Задач" in l for l in lines):
+                lines.append("Задачи:")
+                lines.append("• Подготовить презентацию VELA")
+                lines.append("• Ответить на письмо от партнера")
+                lines.append("")
+            lines.append("Котировки:")
+            lines.append("📈 BTC: $84,250 (+1.8%)")
+            lines.append("📈 ETH: $3,120 (+2.4%)")
+            lines.append("📉 XAU: $2,340 (-0.3%)")
+            lines.append("")
+            lines.append("Напоминания:")
+            lines.append("• 15:00 — Позвонить в банк")
+            lines.append("• 20:00 — Принять витамины")
+
         morning_text = "\n".join(lines)
         await context.bot.send_message(chat_id=user_id, text=morning_text, disable_web_page_preview=True)
 
