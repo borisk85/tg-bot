@@ -885,7 +885,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "city": {"type": "string", "description": "Название города (например: Алматы, Москва, London)"},
-                "forecast_days": {"type": "integer", "description": "Сколько дней прогноза показать (1-5). 0 или не указано = только текущая погода"},
+                "forecast_days": {"type": "integer", "description": "Сколько дней прогноза (1-5). НЕ ПЕРЕДАВАЙ этот параметр если пользователь не просил прогноз явно. 'погода' = только текущая, forecast_days не передавать. 'прогноз на 3 дня' = forecast_days=3."},
                 "skip_days": {"type": "integer", "description": "Сколько дней пропустить от завтра. 'послезавтра' = skip_days=1, days=1. 'через 3 дня' = skip_days=2, days=1"}
             },
             "required": ["city"]
