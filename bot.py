@@ -2706,10 +2706,8 @@ async def check_morning_digest(context):
         _digest_sent_today[user_id] = today
         await send_morning_digest(context)
 
-async def send_morning_digest(context, force=False):
+async def send_morning_digest(context):
     user_id = 661638470
-    if not force and not is_morning_digest_enabled(user_id):
-        return
     try:
         now = now_local()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -2803,29 +2801,6 @@ async def send_morning_digest(context, force=False):
                 lines.extend(task_lines[:10])
         except:
             pass
-
-        # Демо-блоки для скриншота (временно)
-        if force:
-            if not any("Событи" in l for l in lines):
-                lines.append("События:")
-                lines.append("• 10:00 — Созвон с командой")
-                lines.append("• 14:00 — Встреча с инвестором")
-                lines.append("• 18:00 — Теннис")
-                lines.append("")
-            if not any("Задач" in l for l in lines):
-                lines.append("Задачи:")
-                lines.append("• Подготовить презентацию VELA")
-                lines.append("• Ответить на письмо от партнера")
-                lines.append("")
-            lines.append("Котировки:")
-            lines.append("📈 BTC: $84,250 (+1.8%)")
-            lines.append("📉 USD/KZT: 512.40 (-0.2%)")
-            lines.append("📈 TSLA: $254.30 (+3.1%)")
-            lines.append("📈 XAU: $2,340 (+0.5%)")
-            lines.append("")
-            lines.append("Напоминания:")
-            lines.append("• 15:00 — Позвонить в банк")
-            lines.append("• 20:00 — Принять витамины")
 
         morning_text = "\n".join(lines)
         await context.bot.send_message(chat_id=user_id, text=morning_text, disable_web_page_preview=True)
@@ -2966,9 +2941,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
-
-async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_morning_digest(context, force=True)
 
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
@@ -3393,7 +3365,6 @@ def main():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
-    app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
