@@ -1973,22 +1973,37 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     params={**base_params, "cnt": 40}, timeout=10
                 )
                 target_date = (now_local() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-                lines = []
+                slots = []
                 for item in resp2.json().get("list", []):
                     dt_utc = datetime.fromtimestamp(item["dt"], tz=pytz.UTC)
                     dt_local = dt_utc.astimezone(TZ)
                     if dt_local.strftime("%Y-%m-%d") != target_date:
                         continue
-                    t = item["main"]["temp"]
-                    desc_h = item["weather"][0]["description"]
-                    pop = int(item.get("pop", 0) * 100)
-                    rain_mm = item.get("rain", {}).get("3h", 0)
-                    icon_h = _weather_icon(desc_h)
-                    rain_str = f", {rain_mm:.1f} мм" if rain_mm else ""
-                    lines.append(f"{dt_local.strftime('%H:%M')}: {icon_h} {t:.0f}°C, {desc_h}, осадки {pop}%{rain_str}")
-                if lines:
-                    return f"Почасовой прогноз для {city_name} на {target_date}:\n\n" + "\n".join(lines)
-                return f"Нет данных на {target_date} для {city_name}."
+                    slots.append({
+                        "time": dt_local.strftime("%H:%M"),
+                        "pop": item.get("pop", 0),
+                        "rain_mm": item.get("rain", {}).get("3h", 0),
+                    })
+                if not slots:
+                    return f"Нет данных на {target_date} для {city_name}."
+
+                threshold = 0.5
+                day_word = "сегодня" if day_offset == 0 else ("завтра" if day_offset == 1 else f"на {target_date}")
+                rainy = [s for s in slots if s["pop"] >= threshold]
+                if not rainy:
+                    max_pop = max(s["pop"] for s in slots)
+                    if max_pop < 0.2:
+                        return f"☀️ {day_word} дождя не ожидается."
+                    return f"🌤 {day_word} дождя не ожидается (макс. вероятность {int(max_pop*100)}%)."
+
+                first = rainy[0]
+                first_idx = slots.index(first)
+                if first_idx == 0:
+                    after_rain = next((s for s in slots[first_idx:] if s["pop"] < threshold), None)
+                    if after_rain:
+                        return f"🌧 Дождь идёт, закончится около {after_rain['time']}."
+                    return f"🌧 Дождь идёт и продлится до конца дня."
+                return f"🌧 Дождь начнётся около {first['time']}, до этого сухо."
 
             if forecast_days and forecast_days > 0:
                 # Прогноз — показываем ТОЛЬКО прогноз без текущей погоды
