@@ -878,7 +878,8 @@ TOOLS = [
             "properties": {
                 "city": {"type": "string", "description": "Название города (например: Алматы, Москва, London)"},
                 "forecast_days": {"type": "integer", "description": "Сколько дней прогноза (1-5). НЕ ПЕРЕДАВАЙ этот параметр если пользователь не просил прогноз явно. 'погода' = только текущая, forecast_days не передавать. 'прогноз на 3 дня' = forecast_days=3."},
-                "skip_days": {"type": "integer", "description": "Сколько дней пропустить от завтра. 'послезавтра' = skip_days=1, days=1. 'через 3 дня' = skip_days=2, days=1"}
+                "skip_days": {"type": "integer", "description": "Для forecast_days — сколько дней пропустить от завтра ('послезавтра'=1, 'через 3 дня'=2). Для hourly — прямой offset от сегодня: 0=сегодня, 1=завтра, 2=послезавтра."},
+                "hourly": {"type": "boolean", "description": "Вернуть почасовую разбивку (шаг 3 часа) с временем, температурой, описанием, вероятностью осадков и мм дождя. Используй когда спрашивают 'во сколько дождь', 'когда начнётся дождь', 'дождь утром/вечером'. Комбинируется с forecast_days=1 и skip_days для конкретного дня."}
             },
             "required": ["city"]
         }
@@ -1940,6 +1941,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             api_key = os.getenv("OPENWEATHER_API_KEY")
             forecast_days = tool_input.get("forecast_days", 0)
             skip_days = tool_input.get("skip_days", 0)
+            hourly = tool_input.get("hourly", False)
 
             base_params = {"q": city, "appid": api_key, "units": "metric", "lang": "ru"}
 
@@ -1961,6 +1963,29 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             humidity = data["main"]["humidity"]
             wind = data["wind"]["speed"]
             icon = _weather_icon(desc)
+
+            if hourly:
+                resp2 = requests.get(
+                    "https://api.openweathermap.org/data/2.5/forecast",
+                    params={**base_params, "cnt": 40}, timeout=10
+                )
+                target_date = (now_local() + timedelta(days=skip_days)).strftime("%Y-%m-%d")
+                lines = []
+                for item in resp2.json().get("list", []):
+                    dt_utc = datetime.fromtimestamp(item["dt"], tz=pytz.UTC)
+                    dt_local = dt_utc.astimezone(TZ)
+                    if dt_local.strftime("%Y-%m-%d") != target_date:
+                        continue
+                    t = item["main"]["temp"]
+                    desc_h = item["weather"][0]["description"]
+                    pop = int(item.get("pop", 0) * 100)
+                    rain_mm = item.get("rain", {}).get("3h", 0)
+                    icon_h = _weather_icon(desc_h)
+                    rain_str = f", {rain_mm:.1f} мм" if rain_mm else ""
+                    lines.append(f"{dt_local.strftime('%H:%M')}: {icon_h} {t:.0f}°C, {desc_h}, осадки {pop}%{rain_str}")
+                if lines:
+                    return f"Почасовой прогноз для {city_name} на {target_date}:\n\n" + "\n".join(lines)
+                return f"Нет данных на {target_date} для {city_name}."
 
             if forecast_days and forecast_days > 0:
                 # Прогноз — показываем ТОЛЬКО прогноз без текущей погоды
