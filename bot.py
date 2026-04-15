@@ -2981,11 +2981,21 @@ def _get_or_create_drive_folder(service, folder_name: str) -> str:
 
 # Буфер медиа-групп (альбомов): {group_id: {photos, caption, ...}}
 _media_group_buffer: dict = {}
+# Буфер для объединения нескольких альбомов от одного пользователя: {user_id: {count, task}}
+_multi_album_buffer: dict = {}
 
 # Буфер вложений для Gmail: {user_id: {bytes, filename, mime}}
 _pending_attachments: dict = {}
 # Timestamp последнего добавления фото в буфер: {user_id: float}
 _pending_attachments_ts: dict = {}
+
+async def _send_multi_album_reply(user_id: int):
+    """Ждёт 3с пока придут все альбомы, потом отвечает одним сообщением."""
+    await asyncio.sleep(3)
+    data = _multi_album_buffer.pop(user_id, None)
+    if not data:
+        return
+    await data["update"].message.reply_text(f"📎 Сохранено {data['count']} фото. Что сделать — отправить на email или в Drive?")
 
 async def _process_media_group(group_id: str, context):
     """Обрабатывает альбом фото после накопления всех сообщений."""
@@ -3026,9 +3036,13 @@ async def _process_media_group(group_id: str, context):
     ]
     _pending_attachments_ts[user_id] = _time.time()
 
-    # Альбом без подписи — программный ответ без LLM
+    # Альбом без подписи — буферизуем, ждём ещё альбомы от того же юзера
     if not caption:
-        await update.message.reply_text(f"📎 Сохранено {len(photos)} фото. Что сделать — отправить на email или в Drive?")
+        if user_id not in _multi_album_buffer:
+            _multi_album_buffer[user_id] = {"count": len(photos), "update": update}
+            asyncio.create_task(_send_multi_album_reply(user_id))
+        else:
+            _multi_album_buffer[user_id]["count"] += len(photos)
         return
 
     # Альбом с подписью — передаём первое фото в агент
