@@ -2966,22 +2966,6 @@ async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # DEMO: фейковые данные для скриншота — УДАЛИТЬ после демо
-    demo_lines = [
-        "✅ имя: Алексей",
-        "✅ город: Москва",
-        "✅ день_рождения: 15 марта",
-        "✅ интересы: криптовалюта, бег, путешествия",
-        "✅ email_работа: alex@techcorp.io",
-        "✅ портфель: BTC, ETH, SOL",
-        "✅ цель: пробежать марафон в 2026",
-        "✅ аллергия: орехи",
-        "✅ жена: Мария",
-        "✅ кофе: капучино на овсяном, без сахара",
-    ]
-    await update.message.reply_text("Что я о тебе знаю:\n" + "\n".join(demo_lines))
-    return
-    # /DEMO
     memories = get_user_memory(user_id)
     if not memories:
         await update.message.reply_text("Долгосрочная память пуста.")
