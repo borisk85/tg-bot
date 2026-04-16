@@ -1968,33 +1968,43 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             icon = _weather_icon(desc)
 
             if hourly:
-                resp2 = requests.get(
-                    "https://api.openweathermap.org/data/2.5/forecast",
-                    params={**base_params, "cnt": 40}, timeout=10
-                )
+                lat = data["coord"]["lat"]
+                lon = data["coord"]["lon"]
                 target_date = (now_local() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+                resp2 = requests.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": lat, "longitude": lon,
+                        "hourly": "precipitation_probability,precipitation",
+                        "timezone": "Asia/Almaty",
+                        "start_date": target_date, "end_date": target_date,
+                    }, timeout=10
+                )
+                h = resp2.json().get("hourly", {})
+                times = h.get("time", [])
+                probs = h.get("precipitation_probability", [])
+                precips = h.get("precipitation", [])
+                if not times:
+                    return f"Нет данных на {target_date} для {city_name}."
+
+                now_hour = now_local().hour if day_offset == 0 else 0
                 slots = []
-                for item in resp2.json().get("list", []):
-                    dt_utc = datetime.fromtimestamp(item["dt"], tz=pytz.UTC)
-                    dt_local = dt_utc.astimezone(TZ)
-                    if dt_local.strftime("%Y-%m-%d") != target_date:
+                for i, t in enumerate(times):
+                    hour = int(t[11:13])
+                    if hour < now_hour:
                         continue
-                    slots.append({
-                        "time": dt_local.strftime("%H:%M"),
-                        "pop": item.get("pop", 0),
-                        "rain_mm": item.get("rain", {}).get("3h", 0),
-                    })
+                    slots.append({"time": t[11:16], "pop": probs[i], "rain_mm": precips[i]})
                 if not slots:
                     return f"Нет данных на {target_date} для {city_name}."
 
-                threshold = 0.5
+                threshold = 50
                 day_word = "сегодня" if day_offset == 0 else ("завтра" if day_offset == 1 else f"на {target_date}")
                 rainy = [s for s in slots if s["pop"] >= threshold]
                 if not rainy:
                     max_pop = max(s["pop"] for s in slots)
-                    if max_pop < 0.2:
+                    if max_pop < 20:
                         return f"☀️ {day_word} дождя не ожидается."
-                    return f"🌤 {day_word} дождя не ожидается (макс. вероятность {int(max_pop*100)}%)."
+                    return f"🌤 {day_word} дождя не ожидается (макс. вероятность {max_pop}%)."
 
                 first = rainy[0]
                 first_idx = slots.index(first)
