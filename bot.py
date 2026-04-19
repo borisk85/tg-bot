@@ -3059,6 +3059,8 @@ _multi_album_buffer: dict = {}
 _pending_attachments: dict = {}
 # Timestamp последнего добавления фото в буфер: {user_id: float}
 _pending_attachments_ts: dict = {}
+# Буфер фото для контекста Claude: {user_id: {"media_type", "data"}}
+_pending_photo: dict = {}
 
 async def _send_multi_album_reply(user_id: int):
     """Ждёт 3с пока придут все альбомы, потом отвечает одним сообщением."""
@@ -3348,10 +3350,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             new_att["filename"] = "photo_2.jpg"
             _pending_attachments[user_id] = [existing, new_att]
-        # Фото без подписи — НИКОГДА не гоним через LLM. Всегда программный ответ.
-        # Если нужен анализ — пользователь добавит подпись "что тут", "опиши" и т.п.
+        # Фото без подписи — сохраняем для контекста следующего сообщения
         if not user_text:
-            await update.message.reply_text("📎 Фото сохранено. Что сделать — отправить на email или в Drive?")
+            _pending_photo[user_id] = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
+            await update.message.reply_text("📎 Фото получено. Что сделать?")
             return
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
     elif update.message.document:
@@ -3393,6 +3395,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_text = f"[Word: {fname}] {user_text}".strip()
         else:
             user_text = f"[Файл: {fname}] {user_text}".strip()
+
+    # Подхватить фото из буфера если текущее сообщение без фото
+    if not image_data and user_id in _pending_photo:
+        image_data = _pending_photo.pop(user_id)
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
