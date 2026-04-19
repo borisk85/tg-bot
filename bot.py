@@ -2899,6 +2899,16 @@ async def check_reminders(context):
         if changed:
             save_reminders(user_id, reminders)
 
+ALLOWED_USERS = {661638470}
+
+def authorized(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id not in ALLOWED_USERS:
+            return
+        return await func(update, context)
+    return wrapper
+
+@authorized
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text(
@@ -2940,10 +2950,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎨 Генерация изображений"
     )
 
+@authorized
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text("История очищена.")
 
+@authorized
 async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = " ".join(context.args) if context.args else ""
@@ -2966,6 +2978,7 @@ async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"cmd_about error: {e}", exc_info=True)
         await update.message.reply_text("Ошибка при сохранении. Попробуй ещё раз.")
 
+@authorized
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     memories = get_user_memory(user_id)
@@ -2975,13 +2988,16 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"✅ {m['key']}: {m['value']}" for m in memories]
     await update.message.reply_text("Что я о тебе знаю:\n" + "\n".join(lines))
 
+@authorized
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
 
+@authorized
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
 
+@authorized
 async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = " ".join(context.args).strip().lower() if context.args else ""
@@ -3126,6 +3142,7 @@ async def _process_media_group(group_id: str, context):
         else:
             await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
 
+@authorized
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передаёт в run_agent."""
     try:
@@ -3248,6 +3265,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка голосового: {type(e).__name__}: {e}")
 
 
+@authorized
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
