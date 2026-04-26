@@ -2656,7 +2656,7 @@ async def send_weekly_ai_digest(context):
 
 ИЗВЕСТНЫЕ КОНКУРЕНТЫ (актуальный список на апрель 2026):
 - Mira (mira.tg, @mira_ibot) — ГЛАВНАЯ УГРОЗА. Запущена февраль 2026. Официальный AI-ассистент Telegram на блокчейне Cocoon (TON Foundation, The Open Platform). 800+ интеграций через Mira Connect, Claude/GPT-5/Veo3, доступ к 1B+ юзеров TG. Free + Pro подписка через Telegram Stars.
-- OK Bob (okbob.app, @okbob_bot) — узкоспециализированный task tracker + AI-чат /bob с памятью. Целевая аудитория — команды 3-10 человек.
+- OK, Bob! (okbob.app, @okbob_bot) — узкоспециализированный task tracker + AI-чат /bob с памятью. Целевая аудитория — команды 3-10 человек.
 - OpenClaw (openclaw.ai) — open-source self-hosted AI-агент для разработчиков. Вокруг есть SaaS-обёртки EaseClaw, KiloClaw, Zo.
 
 ИЗ ПРЕЖНЕГО СПИСКА УБРАНЫ КАК НЕРЕЛЕВАНТНЫЕ: Salebot (воронки продаж B2B), PuzzleBot (конструктор сценариев B2B), Moltbot/BotFlow.
@@ -2674,7 +2674,7 @@ async def send_weekly_ai_digest(context):
 
 ВКЛЮЧАЙ ТОЛЬКО:
 - Новый личный ИИ-ассистент в Telegram для русскоязычной/СНГ-аудитории
-- Обновление прямых конкурентов (Mira, OK Bob, OpenClaw) если оно затрагивает рынок СНГ
+- Обновление прямых конкурентов (Mira, OK, Bob!, OpenClaw) если оно затрагивает рынок СНГ
 - Telegram-бот личный ИИ-ассистент на базе Claude/GPT для обычных пользователей B2C (не бизнеса) с фокусом на СНГ или русский язык
 - Выход Telegram, TON Foundation, Google, Apple в нишу личных ИИ-ассистентов с приходом на рынок СНГ
 
