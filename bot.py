@@ -75,6 +75,25 @@ def save_reminders(user_id: int, reminders: list):
     if redis_client:
         redis_client.set(f"reminders:{user_id}", json.dumps(reminders, ensure_ascii=False))
 
+
+_MONTHS_RU = [
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
+
+
+def _format_when_human(trigger_dt, now) -> str:
+    """Человечный формат времени напоминания: «сегодня в 14:30», «завтра в 09:00», «28 апреля в 16:45»."""
+    time_str = trigger_dt.strftime("%H:%M")
+    day_diff = (trigger_dt.date() - now.date()).days
+    if day_diff == 0:
+        return f"сегодня в {time_str}"
+    if day_diff == 1:
+        return f"завтра в {time_str}"
+    if day_diff == 2:
+        return f"послезавтра в {time_str}"
+    return f"{trigger_dt.day} {_MONTHS_RU[trigger_dt.month - 1]} в {time_str}"
+
 def get_price_alerts(user_id: int) -> list:
     if redis_client:
         data = redis_client.get(f"price_alerts:{user_id}")
@@ -1547,10 +1566,11 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             if not active:
                 return "Активных напоминаний нет."
             user_tz = get_user_tz(user_id)
+            now = datetime.now(user_tz)
             lines = []
-            for i, r in active:
-                dt = datetime.fromisoformat(r["at"]).astimezone(user_tz).strftime("%d.%m %H:%M")
-                lines.append(f"{i+1}. {dt} — {r['text']}")
+            for idx, (_, r) in enumerate(active, 1):
+                dt = datetime.fromisoformat(r["at"]).astimezone(user_tz)
+                lines.append(f"{idx}. {r['text']} — {_format_when_human(dt, now)}")
             return "\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"
@@ -2687,11 +2707,17 @@ async def send_weekly_ai_digest(context):
 - Общие новости про LLM и ИИ-индустрию
 
 УРОВНИ УГРОЗЫ — строго по критериям:
-🔴 — прямой конкурент: личный ИИ-ассистент в Telegram + B2C + без кода + рынок СНГ или русскоязычный + похожая цена
-🟡 — косвенный: личный ИИ-ассистент в Telegram + B2C + без кода, но другой рынок/язык/аудитория (например, мировой EN-рынок)
+🔴 — прямой конкурент: личный ИИ-ассистент в Telegram + B2C + без кода + рынок СНГ или русскоязычный + похожая цена + use-case пересекается с VELA на 50%+ (ассистент с памятью и интеграциями: почта/календарь/курсы/напоминания/задачи)
+🟡 — косвенный: либо личный ИИ-ассистент в Telegram + B2C + без кода, но другой рынок/язык/аудитория (например, мировой EN-рынок); либо в Telegram + B2C, но другой use-case (write-helper в строке ввода, переводчик, суммаризатор чатов, генератор стикеров — без интеграций с почтой/календарём/финансами)
 🟢 — слабая: другая платформа но та же концепция (личный ИИ-ассистент без кода для обычных людей)
 
 КРИТИЧНО: не завышай уровень угрозы. Если продукт не в Telegram — это максимум 🟢. Если не B2C — это не конкурент вообще. Если продукт не на русскоязычной/СНГ-аудитории — это максимум 🟡.
+
+КРИТЕРИЙ USE-CASE OVERLAP — обязательная проверка перед 🔴:
+Сравни функционал продукта со списком модулей VELA (погода, напоминания, курсы валют/криптовалют/акций, веб-поиск, утренний дайджест, фото-анализ и калории, авиабилеты, Google Calendar/Gmail/Drive/Tasks, генерация изображений, долгосрочная память, ценовые алерты).
+- Если продукт закрывает 50%+ этих модулей или близкие use-cases (почта, календарь, задачи, личная продуктивность с памятью) → 🔴
+- Если продукт делает что-то другое (помощь в переписке, перевод сообщений, суммаризация чатов, групповые AI, креативные генераторы, развлекательный AI-собеседник) → максимум 🟡, даже если он в Telegram + B2C + дешёвый
+Пример: Mira (AI-агент с памятью, поиском, генерацией) → 🔴. Telegram Premium AI (write-helper в строке ввода) → 🟡. ChatGPT-плагин для Telegram без интеграций → 🟡.
 
 ФОРМАТ (строго):
 - Никакого markdown: никаких **, *, #, _
