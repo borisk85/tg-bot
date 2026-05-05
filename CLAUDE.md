@@ -29,9 +29,12 @@ REDIS_URL               — URL Redis (Railway Redis plugin)
 BRAVE_API_KEY           — Brave Search API
 OPENWEATHER_API_KEY     — OpenWeatherMap API
 FAL_API_KEY             — fal.ai (генерация изображений)
+GROQ_API_KEY            — Groq API (голосовые сообщения → Whisper)
+ELEVENLABS_API_KEY      — ElevenLabs TTS (опционально)
 REDDIT_CLIENT_ID        — Reddit API (опционально, для дайджеста)
 REDDIT_CLIENT_SECRET    — Reddit API (опционально, для дайджеста)
 REDDIT_USER_AGENT       — Reddit API user agent (опционально, напр. tg-bot-digest/1.0)
+FIRECRAWL_API_KEY       — Firecrawl (опционально, веб-скрейпинг)
 ```
 
 ## Запуск локально
@@ -65,9 +68,12 @@ git push
 - `drive_search` / `drive_read` / `drive_create_doc` / `drive_create_sheet` / `drive_create_slides` / `drive_create_folder` / `drive_move_file` — Google Drive
 - `web_search` — Brave Search
 - `get_weather` — OpenWeatherMap (текущая + прогноз)
-- `get_crypto_prices` — CoinGecko + ExchangeRate (крипта и фиатные пары)
-- `get_token_info` — Dexscreener (по адресу контракта)
+- `get_crypto_prices` — CoinGecko + ExchangeRate (криптовалюта и фиатные пары)
+- `search_token` — Dexscreener (по адресу контракта или тикеру)
+- `get_market_price` — акции, индексы, металлы, нефть (yfinance)
+- `alert_price_set` / `alert_price_list` / `alert_price_cancel` — ценовые алерты (фоновая проверка каждые 5 мин)
 - `reminder_set` / `reminder_list` / `reminder_cancel` — напоминания (Redis)
+- `memory_save` / `memory_list` / `memory_delete` — долгосрочная память пользователя (инжектируется в system prompt)
 - `generate_image` — fal.ai FLUX dev (текст → изображение)
 
 ## Отключённые / ожидают замены
@@ -92,7 +98,7 @@ git push
 - Анализ фото — нативно через Claude Vision
 
 ## Технические особенности
-- История обрезается до 15 сообщений. При обрезке автоматически удаляются осиротевшие `tool_result` блоки в начале (иначе Claude падает с BadRequestError 400)
+- История обрезается до 60 сообщений (TTL 7 дней). При обрезке автоматически удаляются осиротевшие `tool_result` блоки в начале (иначе Claude падает с BadRequestError 400)
 - Медиа-группы (альбомы): буферизация 1.5с через `_media_group_buffer` + asyncio
 - Меню бота регистрируется через `app.post_init` → `set_my_commands()` при старте
 - `run_weekly` отсутствует в python-telegram-bot v21 → используем `run_daily(days=(1,))` для понедельника (0=вс, 1=пн!)

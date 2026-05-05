@@ -1,115 +1,83 @@
-# Personal AI Agent — Telegram Bot
+# Personal AI Assistant for Telegram
 
-A personal AI assistant built on Claude API, running 24/7 in Telegram. Handles calendar, email, tasks, crypto prices, reminders, voice messages, image generation, and more — all through natural conversation.
+> Production AI assistant with 25+ integrated tools, long-term memory, and voice input. Built with Claude API and Python.
+
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://python.org) [![Claude API](https://img.shields.io/badge/Claude-API-orange)](https://anthropic.com) [![Railway](https://img.shields.io/badge/Deploy-Railway-purple)](https://railway.app)
 
 ## What it does
 
-You talk to it like a personal assistant. It figures out what tool to use:
+Personal AI assistant living in Telegram. Handles natural-language requests across 25+ integrations: Gmail, Google Calendar, Google Tasks, Google Drive, Brave Search, weather, crypto prices, stock quotes, fal.ai image generation, Groq Whisper voice-to-text. Maintains long-term memory across sessions — facts are stored in Redis and injected into every system prompt.
 
 - "What's on my calendar this week?" → Google Calendar
 - "Read my emails from Amazon" → Gmail
-- "Remind me to call dentist at 3pm" → Reminder (Redis)
+- "Remind me to call the dentist at 3pm" → Reminder (Redis)
 - "What's the price of BTC?" → CoinGecko / Binance
 - "Generate an image of a futuristic city" → fal.ai FLUX
-- "Transcribe this" → sends a voice message → Groq Whisper
-
-## Stack
-
-| Layer | Tech |
-|---|---|
-| Language | Python 3.12 |
-| Bot framework | python-telegram-bot v21 |
-| AI | Anthropic Claude (claude-sonnet-4-6) |
-| Memory / Reminders | Redis |
-| Deployment | Railway (auto-deploy on git push) |
-| Voice transcription | Groq Whisper Large V3 |
-| Image generation | fal.ai FLUX dev |
-
-## Tools available to the agent
-
-**Google Workspace**
-- `calendar_list_events` / `calendar_create_event` / `calendar_delete_event`
-- `gmail_search` / `gmail_read` / `gmail_send` / `gmail_trash` / `gmail_mark_spam` / `gmail_unsubscribe`
-- `tasks_list` / `tasks_create` / `tasks_complete` / `tasks_update` / `tasks_delete`
-- `drive_search` / `drive_read` / `drive_create_doc` / `drive_create_sheet` / `drive_create_folder` / `drive_move_file` / `drive_delete`
-
-**Market data**
-- `get_crypto_prices` — BTC/ETH/SOL and other major coins (CoinGecko + Binance fallback)
-- `search_token` — any token by name, ticker, or contract address (DexScreener)
-- `get_market_price` — stocks, indices (NASDAQ, S&P500), metals (gold, silver), oil (yfinance)
-- `alert_price_set` / `alert_price_list` / `alert_price_cancel` — price alerts with background job every 5 min
-
-**Utilities**
-- `web_search` — Brave Search
-- `get_weather` — OpenWeatherMap (current + 5-day forecast)
-- `reminder_set` / `reminder_list` / `reminder_cancel` — reminders stored in Redis
-- `generate_image` — text-to-image via fal.ai FLUX dev
-- `memory_save` / `memory_list` / `memory_delete` — long-term memory per user (injected into system prompt)
-- `get_current_datetime` — current date/time in user's timezone
-
-**Document handling**
-- Read PDF and Word files sent to chat
-- Upload any file or photo to Google Drive
-- Attach files from chat to Gmail messages
+- *sends a voice message* → transcribed via Groq Whisper → answered by Claude
 
 ## Architecture
 
-```
-User → Telegram
-            → bot.py
-                → Claude API (tool_use agent loop)
-                    → execute_tool()
-                        → Google APIs / Redis / yfinance / DexScreener / ...
-                → reply → User
-```
+Single-file Python bot ([bot.py](bot.py), 3500 lines) built around a stateful agent loop. Each incoming message starts a `run_agent()` call that drives Claude through up to 10 tool-use iterations until it reaches `end_turn`. `execute_tool()` dispatches tool calls to 25+ handler functions covering Google Workspace APIs, financial data, web search, and file handling. Conversation history (last 60 messages, 7-day TTL) and long-term user memory are persisted in Redis. python-telegram-bot v21 handles all Telegram events asynchronously.
 
-The agent loop runs until Claude stops requesting tools or hits the iteration limit. All conversation history is stored in Redis (last 30 messages, TTL 7 days). Long-term facts about the user are stored separately and injected into every system prompt.
-
-## Automated features
-
-- **Morning digest** — daily at 11:00 Almaty: weather + calendar events + tasks
-- **Competitive radar** `/ai_agents_digest` — every Monday at 12:00 Almaty: AI agent market news filtered by niche (Brave Search + HackerNews)
-- **Price alerts** — background job every 5 minutes checks all active price alerts and notifies when triggered
-
-## Voice messages
-
-Send a voice message → bot transcribes via Groq Whisper Large V3 → passes text to Claude as if typed. Free tier: 7200 min/day.
-
-## Setup
-
-### Environment variables
-
-```
-TELEGRAM_TOKEN          — from @BotFather
-ANTHROPIC_API_KEY       — Anthropic API key
-GOOGLE_CLIENT_ID        — Google OAuth2 client ID
-GOOGLE_CLIENT_SECRET    — Google OAuth2 client secret
-GOOGLE_REFRESH_TOKEN    — obtained via auth_google.py
-REDIS_URL               — Redis connection URL
-BRAVE_API_KEY           — Brave Search API
-OPENWEATHER_API_KEY     — OpenWeatherMap API
-FAL_API_KEY             — fal.ai
-GROQ_API_KEY            — Groq (voice transcription)
+```mermaid
+flowchart LR
+    U[User] -->|message| TG[Telegram]
+    TG --> H[handle_message]
+    H --> RA[run_agent\nagent loop ×10]
+    RA -->|tool_use| ET[execute_tool\ndispatcher]
+    ET --> EXT[Google APIs\nRedis / Brave\nCoinGecko / yfinance\nfal.ai / Groq]
+    ET -->|tool_result| RA
+    RA -->|end_turn| H
+    H -->|reply| U
 ```
 
-### Google OAuth2
+## Tech stack
+
+**Core:** Python 3.12, Claude API (`claude-sonnet-4-6`, agent loop with tool use), Redis  
+**Voice:** Groq Whisper Large V3  
+**Integrations:** Gmail API, Google Calendar API, Google Tasks API, Google Drive API, Brave Search, CoinGecko, Binance, yfinance, fal.ai FLUX  
+**Infrastructure:** Railway (auto-deploy on git push)
+
+## Key features
+
+- **Multi-tool agent loop** — Claude calls tools iteratively until it has enough context to reply (up to 10 iterations)
+- **Persistent long-term memory** — user facts retained across sessions, injected into every system prompt
+- **Voice input** — voice messages transcribed via Groq Whisper Large V3, passed to Claude as text
+- **Financial data** — crypto prices (CoinGecko + Binance fallback), stocks/indices/metals (yfinance), DexScreener token lookup by contract address
+- **Morning digest** — daily briefing at 11:00: weather + calendar events + tasks
+- **Competitive radar** — weekly AI agent market digest from Brave Search + HackerNews (every Monday)
+- **Price alerts** — background job polls every 5 min, notifies when trigger price is hit
+- **File handling** — read PDF/Word from chat, upload to Drive, attach to Gmail
+
+## Code highlights
+
+- [bot.py:2441](bot.py#L2441) — `run_agent()`: agent loop, up to 10 Claude API iterations
+- [bot.py:1059](bot.py#L1059) — `execute_tool()`: tool dispatcher, 25+ handlers
+- [bot.py:481](bot.py#L481) — `TOOLS`: tool schema definitions for Claude function calling
+- [bot.py:50](bot.py#L50) — Redis memory layer: history, reminders, price alerts, long-term facts
+
+## Local setup
 
 ```bash
+git clone https://github.com/borisk85/tg-bot
+cd tg-bot
+python -m venv .venv
+source .venv/bin/activate  # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python auth_google.py   # opens browser, saves refresh token
-```
-
-Copy the printed `GOOGLE_REFRESH_TOKEN` to your environment variables.
-
-> Note: keep your Google Cloud Console app in **Published** mode (not Testing) to prevent refresh tokens from expiring every 7 days.
-
-### Run locally
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env   # fill in your keys
+cp .env.example .env
+# Fill in your API keys in .env
 python bot.py
 ```
+
+### Google OAuth2 setup
+
+```bash
+python auth_google.py   # opens browser, saves refresh token to console
+```
+
+Copy the printed `GOOGLE_REFRESH_TOKEN` to your `.env`.
+
+> Keep your Google Cloud Console app in **Published** mode — Testing mode expires refresh tokens every 7 days.
 
 ### Deploy to Railway
 
@@ -118,26 +86,35 @@ python bot.py
 3. Add all environment variables in Railway dashboard
 4. Push to `master` — Railway deploys automatically
 
-```bash
-git push origin master
-```
+## Environment variables
 
-## Adding a new tool
+| Variable | Required | Description |
+|---|---|---|
+| `TELEGRAM_TOKEN` | yes | From @BotFather |
+| `ANTHROPIC_API_KEY` | yes | Anthropic API key |
+| `REDIS_URL` | yes | Redis connection URL |
+| `GOOGLE_CLIENT_ID` | yes | Google OAuth2 client ID |
+| `GOOGLE_CLIENT_SECRET` | yes | Google OAuth2 client secret |
+| `GOOGLE_REFRESH_TOKEN` | yes | Obtained via `auth_google.py` |
+| `BRAVE_API_KEY` | yes | Brave Search API |
+| `OPENWEATHER_API_KEY` | yes | OpenWeatherMap API |
+| `FAL_API_KEY` | yes | fal.ai image generation |
+| `GROQ_API_KEY` | yes | Groq voice transcription |
+| `ELEVENLABS_API_KEY` | no | ElevenLabs TTS |
+| `REDDIT_CLIENT_ID` | no | Reddit API (weekly digest) |
+| `REDDIT_CLIENT_SECRET` | no | Reddit API (weekly digest) |
+| `FIRECRAWL_API_KEY` | no | Firecrawl web scraping |
 
-1. Add tool definition to `TOOLS` list in `bot.py`
-2. Add handler case in `execute_tool()` in `bot.py`
-3. Add any new dependencies to `requirements.txt`
-4. `git push` — Railway deploys automatically
+## About
 
-## Key technical notes
+Built and maintained by Boris Komarov as a personal productivity tool. Part of a portfolio of production AI products: [Velabot](https://velabot.io).
 
-- **Agent loop**: Claude runs tools in a loop until it decides to respond. Max iterations prevent infinite loops.
-- **Orphan tool_result fix**: When conversation history is trimmed to 30 messages, orphaned `tool_result` blocks at the start are removed — otherwise Claude API returns 400.
-- **Media groups (albums)**: Buffered for 1.5s via `_media_group_buffer` + asyncio before processing.
-- **Pending attachments**: Files/photos sent to chat are stored in `_pending_attachments[user_id]` and automatically attached to the next `gmail_send` call.
-- **Voice messages**: `message.text` is read-only in python-telegram-bot v21 — voice handler calls `run_agent()` directly instead of mutating the message object.
-- **Local imports inside execute_tool**: Use `import X as _X` for local imports — a plain `import re` inside any branch makes `re` local to the entire function in Python, breaking regex in other branches.
+## Contact
 
-## License
+- Studio: [vibecraft.kz](https://vibecraft.kz)
+- Email: bkomarov85@gmail.com
+- Telegram: [@borisk85](https://t.me/borisk85)
 
-MIT
+---
+
+*Closed contributions. This is a personal project showcased as portfolio.*

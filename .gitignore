@@ -1,4 +1,14 @@
 .env
+.env.local
+*.key
+*.pem
+secrets/
+credentials.json
+token.json
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+venv/
+.DS_Store
+node_modules/
