@@ -383,7 +383,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: ПИСЬМА — при чтении и пересказе писем ВСЕГДА показывай оригинальный текст письма как есть, без перевода. Переводи на русский ТОЛЬКО если пользователь явно попросил "переведи" или "на русском". Если письмо на английском — показывай на английском.
 
-Правило: НИКОГДА не сохраняй, не записывай, не создавай задачи/события/напоминания если пользователь явно написал "ничего не делай", "это я для себя", "не сохраняй", "просто заметка", "для себя" — даже если в сообщении есть список дел или планы. Пользователь думает вслух или делает заметку для себя, а не просит тебя что-то сделать. В таком случае просто промолчи или ответь "Понял."
+Правило: НИКОГДА не сохраняй, не записывай, не создавай задачи/события/напоминания если пользователь явно написал "ничего не делай", "это я для себя", "не сохраняй", "просто заметка", "для себя" — даже если в сообщении есть список дел или планы. Пользователь думает вслух или делает заметку для себя, а не просит тебя что-то сделать. При этом отвечай по контексту как обычно — кратко прокомментируй, задай уточняющий вопрос, дай оценку. Не создавай артефакты (задачи/события/напоминания), но не обрывай диалог ответом "Понял."
 
 Правило: НИКОГДА не перечисляй свои возможности списком в ответе. Команда /start уже содержит полный список. Если пользователь спрашивает "ты правда это умеешь?", "что ты умеешь?" — отвечай коротко в 1-2 предложения, не пересказывай меню. Пример: "Да, все работает — просто напиши что нужно."
 
@@ -426,7 +426,9 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Команды бота:
 /clear — очистить историю
 /myid — Telegram ID
-/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram на рынке СНГ прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
+/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram на рынке СНГ прямо сейчас (каждый пн в 12:00 приходит автоматически)
+/mailkit_digest — запустить дайджест по конкурентам MailKit на EN-рынке прямо сейчас (каждый пн в 12:05 приходит автоматически)
+/career_digest — запустить дайджест по конкурентам Career Navigator на EN-рынке прямо сейчас (каждый пн в 12:10 приходит автоматически)"""
 
 # ── Weather helpers ───────────────────────────────────────────────────────────
 
@@ -2760,6 +2762,361 @@ async def send_weekly_ai_digest(context):
         await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка недельного дайджеста: {e}")
 
 
+async def send_weekly_career_navigator_digest(context):
+    """Еженедельный дайджест по конкурентам Career Navigator на EN-рынке — каждый пн в 12:10."""
+    user_id = 661638470
+    try:
+        await context.bot.send_chat_action(chat_id=user_id, action="typing")
+
+        BRAVE_QUERIES = [
+            "AI job risk calculator SaaS launch 2026",
+            "career AI automation risk score tool",
+            "resume AI risk analysis pay per use",
+            "AI career coach risk assessment personal report",
+            "анализ резюме ИИ риск профессии сервис 2026",
+            "карьера искусственный интеллект автоматизация профессии инструмент",
+        ]
+        brave_items = []
+        for q in BRAVE_QUERIES:
+            try:
+                results = _brave_search(q, count=6)
+                for r in results:
+                    brave_items.append(f"- {r['title']}: {r.get('description', '')[:120]} ({r['url']})")
+            except Exception:
+                pass
+
+        HN_QUERIES = ["AI job displacement", "career automation risk", "resume AI analysis", "AI career tool"]
+        EXCLUDE_WORDS = {"llm training", "fine-tuning", "dataset", "paper", "arxiv", "benchmark", "model weights", "academic"}
+        hn_items = []
+        seen_titles = set()
+        for q in HN_QUERIES:
+            try:
+                hits = _hn_search(q)
+                for h in hits:
+                    title_low = h["title"].lower()
+                    if h["title"] in seen_titles:
+                        continue
+                    if any(ex in title_low for ex in EXCLUDE_WORDS):
+                        continue
+                    seen_titles.add(h["title"])
+                    hn_items.append(f"- [{h['points']}pts] {h['title']} ({h['url']})")
+            except Exception:
+                pass
+
+        reddit_items = []
+        reddit_id = os.getenv("REDDIT_CLIENT_ID")
+        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET")
+        if reddit_id and reddit_secret:
+            try:
+                import praw
+                reddit = praw.Reddit(
+                    client_id=reddit_id,
+                    client_secret=reddit_secret,
+                    user_agent=os.getenv("REDDIT_USER_AGENT", "tg-bot-digest/1.0"),
+                )
+                SUBREDDITS = ["SaaS", "indiehackers", "artificial", "cscareerquestions", "jobs", "careerguidance"]
+                INCLUDE_WORDS = {"ai risk", "automation risk", "job risk", "career ai", "resume ai", "ai replace", "displaced", "career tool", "career plan", "future of work", "ai impact career"}
+                for sub_name in SUBREDDITS:
+                    try:
+                        sub = reddit.subreddit(sub_name)
+                        for post in sub.top(time_filter="week", limit=15):
+                            title_low = post.title.lower()
+                            if not any(w in title_low for w in INCLUDE_WORDS):
+                                continue
+                            reddit_items.append(f"- [r/{sub_name}, {post.score}↑] {post.title} ({post.url})")
+                    except Exception:
+                        pass
+            except ImportError:
+                pass
+
+        now = now_local()
+        raw_data = []
+        if brave_items:
+            raw_data.append("=== WEB (Brave Search) ===\n" + "\n".join(brave_items[:30]))
+        if hn_items:
+            raw_data.append("=== HACKER NEWS ===\n" + "\n".join(hn_items[:20]))
+        if reddit_items:
+            raw_data.append("=== REDDIT ===\n" + "\n".join(reddit_items[:30]))
+
+        if not raw_data:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ Career Navigator digest: не удалось получить данные.")
+            return
+
+        product_profile = """ПРОДУКТ — Career Navigator (MVP v1, в разработке):
+Два флоу в одном приложении:
+
+Career Rescue (специалисты): загружает резюме → Claude парсит навыки/стаж/отрасль → на основе WEF/McKinsey/O*NET/Oxford Martin выдает: КАК именно изменится твоя профессия к 2030 + что делать: апгрейдить скиллы, мигрировать в смежную роль или менять профессию. План: 3 навыка, курсы с ценами/сроками, таймлайн, прогноз зарплаты $X→$Y.
+
+Career Pass (15-18 лет): выбирает профессию → риск на горизонте 5 лет → рекомендации по университету + специальности + стране.
+
+Ключевое: структурированный отчет в личном кабинете + PDF. Не чат, не ChatGPT-обёртка. Все данные только из верифицированных источников, никаких галлюцинаций.
+
+МОДЕЛЬ: Pay-per-use. Один отчет — одна оплата.
+РЫНОК: EN + RU/СНГ, двуязычный.
+
+ИЗВЕСТНЫЕ КОНКУРЕНТЫ (май 2026):
+Прямых аналогов с полным пайплайном (резюме + AI-трансформация профессии + конкретный план) НЕТ.
+- What About AI (whataboutai.com) — free risk score по должности. Нет резюме-парсинга, нет плана, нет кабинета.
+- SolidAITech (solidaitech.com) — free vulnerability score. Нет плана, нет кабинета.
+- jobriskcheck.com / aijobrisk.in — free calculators без персонализации.
+- Jobright.ai, Cruit, career.io — AI career tools про трудоустройство (ATS, job search), не про AI-трансформацию профессии.
+- cvator.ru, soprovodai.ru — RU ATS. Другой use-case."""
+
+        prompt = f"""You are a competitive analyst for Career Navigator — a pay-per-use SaaS (MVP v1) that does the full pipeline: resume upload → Claude parses skills/experience/industry → generates a structured report: how AI will transform YOUR specific profession by 2030 + concrete action plan (upgrade skills / pivot to adjacent role / switch profession). Personal cabinet + PDF export. Market: EN + RU/CIS, bilingual. Below is the product profile and raw news for the week ending {now.strftime('%d.%m.%Y')}.
+
+{product_profile}
+
+TASK:
+From the news, select ONLY relevant threats or market signals for Career Navigator. Be strict.
+
+DEFINITION OF DIRECT COMPETITOR (full pipeline required):
+A direct competitor does ALL of the following:
+1. User uploads resume OR describes their profession
+2. Tool analyzes specifically HOW AI will transform that profession (not generic "AI is coming")
+3. Gives a concrete recommendation: upgrade skills / pivot to adjacent role / change profession entirely
+4. Provides a structured output: personal cabinet, PDF report, or detailed plan with courses/timeline/salary forecast
+5. Is a standalone paid product (not a ChatGPT prompt, not a one-page free calculator)
+
+PARTIAL competitors (missing one or more steps above) — still worth noting but clearly labeled.
+
+INCLUDE:
+- Any new SaaS doing the full pipeline above (resume → AI transformation analysis → action plan)
+- Updates to What About AI or SolidAITech if they add plan/cabinet/paywall features
+- Any pay-per-use career analysis product launching
+- Major WEF/McKinsey/OECD report on AI job transformation (demand signal)
+
+DO NOT INCLUDE (STRICT):
+- ATS/resume optimization tools (keyword matching for job applications) — different use case
+- Job search platforms (Indeed, LinkedIn, Glassdoor clones)
+- AI writing tools for cover letters
+- Generic career coaching platforms without AI risk analysis
+- Free calculators that just output a percentage with no plan
+- B2B HR software (not B2C)
+- LLM/AI news unrelated to careers
+
+THREAT LEVELS:
+🔴 — full pipeline: resume → AI transformation analysis → concrete plan → paid product. Direct competitor.
+🟡 — partial: has AI risk analysis BUT no plan/cabinet/payment, OR has career plan BUT no AI transformation analysis. Note exactly what's missing.
+🟢 — market signal: major research report affecting demand, or adjacent tool that could expand into our space.
+
+FORMAT (strict):
+- No markdown: no **, *, #, _
+- Each item: label + name + dash + 1-2 sentences + (link)
+- No --- separators
+- English output
+- For 🟡 always note: what's missing (no cabinet, no plan, no PDF, free only)
+
+IF relevant news exists:
+🎯 CAREER NAVIGATOR COMPETITOR DIGEST ({now.strftime('%d.%m.%Y')})
+
+🔴/🟡/🟢 Name — summary. (link)
+
+Conclusion: 1-2 sentences.
+
+IF NOTHING relevant:
+✅ Career Navigator competitor digest ({now.strftime('%d.%m.%Y')}): no direct threats found this week. Market is quiet.
+
+DATA:
+{chr(10).join(raw_data)}"""
+
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        digest_text = response.content[0].text
+
+        for i in range(0, len(digest_text), 4096):
+            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
+
+        history = get_history(user_id)
+        history.append({"role": "assistant", "content": f"[Career Navigator конкурентный дайджест]\n{digest_text}"})
+        set_history(user_id, history)
+
+    except Exception as e:
+        logger.error(f"Career Navigator digest error: {e}", exc_info=True)
+        await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка Career Navigator дайджеста: {e}")
+
+
+async def send_weekly_mailkit_digest(context):
+    """Еженедельный дайджест по конкурентам MailKit на EN-рынке — каждый пн в 12:05."""
+    user_id = 661638470
+    try:
+        await context.bot.send_chat_action(chat_id=user_id, action="typing")
+
+        BRAVE_QUERIES = [
+            "custom domain email gmail setup service launch 2026",
+            "SendMailAs alternative email domain automation",
+            "cloudflare email routing gmail send-as tool",
+            "email on your domain SaaS indie hacker 2026",
+            "automate gmail send-as custom domain any registrar",
+            "professional email godaddy namecheap gmail setup service",
+        ]
+        brave_items = []
+        for q in BRAVE_QUERIES:
+            try:
+                results = _brave_search(q, count=6)
+                for r in results:
+                    brave_items.append(f"- {r['title']}: {r.get('description', '')[:120]} ({r['url']})")
+            except Exception:
+                pass
+
+        HN_QUERIES = ["custom domain email", "email setup", "gmail send-as", "cloudflare email"]
+        EXCLUDE_WORDS = {"newsletter", "marketing email", "cold email", "spam", "deliverability tool", "bulk", "campaign"}
+        hn_items = []
+        seen_titles = set()
+        for q in HN_QUERIES:
+            try:
+                hits = _hn_search(q)
+                for h in hits:
+                    title_low = h["title"].lower()
+                    if h["title"] in seen_titles:
+                        continue
+                    if any(ex in title_low for ex in EXCLUDE_WORDS):
+                        continue
+                    seen_titles.add(h["title"])
+                    hn_items.append(f"- [{h['points']}pts] {h['title']} ({h['url']})")
+            except Exception:
+                pass
+
+        reddit_items = []
+        reddit_id = os.getenv("REDDIT_CLIENT_ID")
+        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET")
+        if reddit_id and reddit_secret:
+            try:
+                import praw
+                reddit = praw.Reddit(
+                    client_id=reddit_id,
+                    client_secret=reddit_secret,
+                    user_agent=os.getenv("REDDIT_USER_AGENT", "tg-bot-digest/1.0"),
+                )
+                SUBREDDITS = ["SaaS", "indiehackers", "webdev", "selfhosted", "Entrepreneur"]
+                INCLUDE_WORDS = {"email", "domain", "cloudflare", "smtp", "send-as", "sendas", "mailbox", "forwarding", "inbox"}
+                for sub_name in SUBREDDITS:
+                    try:
+                        sub = reddit.subreddit(sub_name)
+                        for post in sub.top(time_filter="week", limit=15):
+                            title_low = post.title.lower()
+                            if not any(w in title_low for w in INCLUDE_WORDS):
+                                continue
+                            reddit_items.append(f"- [r/{sub_name}, {post.score}↑] {post.title} ({post.url})")
+                    except Exception:
+                        pass
+            except ImportError:
+                pass
+
+        now = now_local()
+        raw_data = []
+        if brave_items:
+            raw_data.append("=== WEB (Brave Search) ===\n" + "\n".join(brave_items[:30]))
+        if hn_items:
+            raw_data.append("=== HACKER NEWS ===\n" + "\n".join(hn_items[:20]))
+        if reddit_items:
+            raw_data.append("=== REDDIT ===\n" + "\n".join(reddit_items[:30]))
+
+        if not raw_data:
+            await context.bot.send_message(chat_id=user_id, text="⚠️ MailKit digest: не удалось получить данные.")
+            return
+
+        product_profile = """ПРОДУКТ — MailKit (getmailkit.com):
+SaaS, автоматизирующий настройку корпоративной почты на своём домене в существующем Gmail-аккаунте. Юзер получает hello@yourdomain.com за $5 разово, не теряя привычный Gmail.
+
+МЕХАНИКА: Cloudflare Email Routing + AWS SES Tenant Management + Gmail Send-As wizard. Требует Cloudflare DNS (это ограничение аудитории). Один платёж — юзер владеет стеком навсегда, без зависимости от MailKit.
+
+РЫНОК: B2C, EN-рынок. ICP — indie hackers, solopreneurs, freelancers с 3-10 проектами. Gmail = основной ящик, переезжать на Workspace не хотят. Ценят время > $50/час.
+
+ЦЕНА: $5 разово за один mailbox setup. Не подписка.
+
+ИЗВЕСТНЫЕ КОНКУРЕНТЫ:
+- SendMailAs (sendmailas.com) — ПРЯМОЙ КОНКУРЕНТ. Cloudflare + Gmail Send-As автоматизация. Модель: $29/год (подписка, lock-in на их SMTP relay). Бесплатный tier: 1 домен, 2 адреса.
+- ImprovMX (improvmx.com) — email forwarding + SMTP, $9/мес подписка. Нет Send-As автоматизации.
+- ForwardEmail (forwardemail.net) — open-source forwarding + SMTP, $3/мес. Нет Send-As автоматизации.
+- Google Workspace — заменяет Gmail, $7/user/мес. Другой ICP.
+- Zoho Mail — заменяет Gmail, бесплатно/$1.25/мес. Другой ICP.
+
+КЛЮЧЕВОЕ ОТЛИЧИЕ: MailKit = one-time fee, юзер владеет стеком. SendMailAs = подписка, зависимость от их relay."""
+
+        prompt = f"""You are a competitive analyst for MailKit (getmailkit.com). Niche: automating custom domain email setup for Gmail users (Cloudflare Email Routing + Gmail Send-As). Market: English-speaking, indie hackers / solopreneurs / freelancers. Below is the product profile and raw news for the week ending {now.strftime('%d.%m.%Y')}.
+
+{product_profile}
+
+TASK:
+From the news, select ONLY direct threats to MailKit. Be strict — better to miss than include irrelevant.
+
+DEFINITION OF RELEVANT COMPETITOR (memorize this):
+A relevant competitor does ALL of the following in one product:
+1. Takes a user's domain (any registrar — Cloudflare, GoDaddy, Namecheap, Squarespace, etc.)
+2. Automatically sets up DNS records (MX, SPF, DKIM, DMARC) for email on that domain
+3. Provides or configures SMTP sending credentials
+4. Guides or automates Gmail Send-As setup so the user sends FROM hello@theirdomain.com inside their regular Gmail inbox
+Result: user gets a professional email address on their domain, fully working in Gmail, without leaving Gmail.
+
+PARTIAL SOLUTIONS — NOT relevant competitors (exclude):
+- Forwarding-only (emails received but can't send from Gmail as hello@domain.com) — NOT a competitor
+- DNS setup tool only — NOT a competitor
+- SMTP relay only — NOT a competitor
+- Full email hosting that REPLACES Gmail (Workspace, Zoho, Fastmail) — different ICP, NOT a competitor
+
+INCLUDE ONLY:
+- New service doing the full pipeline above (any DNS provider)
+- Updates to SendMailAs that change pricing, features, or supported DNS providers
+- Any SaaS launching that promises "get professional email on your domain, keep using Gmail" end-to-end
+
+DO NOT INCLUDE:
+- ImprovMX, ForwardEmail — forwarding only, excluded
+- Marketing email platforms (Mailchimp, Brevo, SendGrid) — different category
+- Full email hosting replacing Gmail — different ICP
+- Self-hosted email servers — for sysadmins
+- Email deliverability/monitoring tools
+- Newsletter platforms, enterprise security, general AI
+
+THREAT LEVELS:
+🔴 — full pipeline, Cloudflare DNS (same ICP as MailKit today)
+🟡 — full pipeline, works with any DNS provider (GoDaddy, Namecheap, etc.) — same problem, broader audience. Always include: DNS providers supported, pricing model, how they handle Gmail Send-As step.
+🟢 — related but partial (e.g. forwarding + manual Send-As guide, or known competitor pricing change worth noting)
+
+CRITICAL: If a service does NOT automate Gmail Send-As — it is not a competitor regardless of anything else. One-time payment is 🔴/🟡, subscription is also 🔴/🟡 (still a competitor).
+
+FORMAT (strict):
+- No markdown: no **, *, #, _
+- Each item: label + name + dash + 1-2 sentences + (link)
+- No --- separators
+- English output
+
+IF relevant news exists:
+🎯 MAILKIT COMPETITOR DIGEST ({now.strftime('%d.%m.%Y')})
+
+🔴/🟡/🟢 Name — summary. (link)
+
+Conclusion: 1-2 sentences.
+
+IF NOTHING relevant (this is normal — most weeks are quiet):
+✅ MailKit competitor digest ({now.strftime('%d.%m.%Y')}): no direct threats found this week. Market is quiet.
+
+DATA:
+{chr(10).join(raw_data)}"""
+
+        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        digest_text = response.content[0].text
+
+        for i in range(0, len(digest_text), 4096):
+            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
+
+        history = get_history(user_id)
+        history.append({"role": "assistant", "content": f"[MailKit конкурентный дайджест]\n{digest_text}"})
+        set_history(user_id, history)
+
+    except Exception as e:
+        logger.error(f"MailKit digest error: {e}", exc_info=True)
+        await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка MailKit дайджеста: {e}")
+
+
 _digest_sent_today = {}
 
 async def check_morning_digest(context):
@@ -3030,6 +3387,16 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
+
+@authorized
+async def cmd_mailkit_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Собираю MailKit дайджест, подожди 30-60 сек...")
+    await send_weekly_mailkit_digest(context)
+
+@authorized
+async def cmd_career_navigator_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Собираю Career Navigator дайджест, подожди 30-60 сек...")
+    await send_weekly_career_navigator_digest(context)
 
 @authorized
 async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3469,10 +3836,14 @@ def main():
     import datetime as dt
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
+    app.job_queue.run_daily(send_weekly_mailkit_digest, time=dt.time(hour=12, minute=5, tzinfo=TZ), days=(1,))  # пн 12:05, через 5 мин после VELA
+    app.job_queue.run_daily(send_weekly_career_navigator_digest, time=dt.time(hour=12, minute=10, tzinfo=TZ), days=(1,))  # пн 12:10
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
+    app.add_handler(CommandHandler("mailkit_digest", cmd_mailkit_digest))
+    app.add_handler(CommandHandler("career_digest", cmd_career_navigator_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
@@ -3486,7 +3857,9 @@ def main():
             BotCommand("start", "Начать"),
             BotCommand("clear", "Очистить историю чата"),
             BotCommand("myid", "Мой Telegram ID"),
-            BotCommand("ai_agents_digest", "Дайджест по личным ИИ-ассистентам в Telegram (СНГ)"),
+            BotCommand("ai_agents_digest", "Анализ конкурентов: личные ИИ-ассистенты в Telegram СНГ"),
+            BotCommand("mailkit_digest", "Анализ конкурентов MailKit EN-рынок"),
+            BotCommand("career_digest", "Анализ конкурентов Career Navigator EN+RU рынок"),
             BotCommand("timezone", "Часовой пояс"),
             BotCommand("memory", "Что бот знает обо мне"),
             BotCommand("about", "Рассказать о себе"),
