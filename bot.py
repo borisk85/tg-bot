@@ -202,6 +202,23 @@ def set_digest_time(user_id: int, hour: int, minute: int):
     if redis_client:
         redis_client.set(f"digest_time:{user_id}", f"{hour}:{minute:02d}")
 
+def get_digest_sections(user_id: int) -> dict:
+    """Возвращает включенные секции дайджеста. По умолчанию все выключены."""
+    if redis_client:
+        v = redis_client.get(f"digest_sections:{user_id}")
+        if v:
+            try:
+                return json.loads(v)
+            except Exception:
+                pass
+    return {}
+
+def set_digest_section(user_id: int, section: str, enabled: bool):
+    sections = get_digest_sections(user_id)
+    sections[section] = enabled
+    if redis_client:
+        redis_client.set(f"digest_sections:{user_id}", json.dumps(sections))
+
 def serialize_messages(messages: list) -> list:
     """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
     result = []
@@ -356,6 +373,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: если пользователь присылает фото как референс (цвета, стиль, пример) и просит что-то сделать — используй информацию с фото и выполни задачу немедленно. Не описывай что на фото, не проси прислать то, что уже видно. Действуй, не анализируй вслух.
 Правило: если пользователь прислал фото БЕЗ подписи — НИКОГДА не описывай его содержимое автоматически. Единственные исключения: пользователь явно написал "опиши", "что здесь", "проанализируй", "что на фото". Во всех остальных случаях: посмотри историю — если последнее действие было отправка на email, сразу отправь это фото туда же. Иначе ответь ровно одной фразой: "Фото сохранено. Что сделать — отправить на email или сохранить в Drive?" и жди команды. Описание без явного запроса — запрещено.
 
+Правило: когда инструмент возвращает текст с вопросом к пользователю (например "Что добавить?", "Что показать?") — этот вопрос ОБЯЗАН попасть в ответ дословно. Нельзя заменять вопрос на "скажи мне", "если хочешь — говори" или любую другую формулировку. Вопрос из инструмента = вопрос к пользователю, без изменений.
 Правило: НИКОГДА не говори что выполнил действие, если не вызвал соответствующий инструмент. Если пользователь просит "отключи дайджест" — обязан вызвать morning_digest_toggle(enabled=false). Если просит "удали задачу" — вызови tasks_delete. Если "забудь X" — вызови memory_delete. Запрещено отвечать "готово", "отключил", "удалил" без реального вызова инструмента. Это критическая ошибка доверия. ОСОБО: запрещено писать "Сохранено", "Запомнил", "Записал", "Принято к сведению" если не вызвал memory_save — даже если информация осталась в истории диалога, это не значит что она сохранена в долгосрочную память.
 Правило: МНОГОШАГОВЫЕ КОМАНДЫ — если пользователь просит несколько действий в одном сообщении ("удали X и создай Y", "убери одно и оставь другое") — выполни КАЖДОЕ действие отдельным вызовом инструмента. Нельзя выполнить одно и промолчать о втором. Нельзя сказать "готово" если выполнена только часть. Пример: "удали напоминание в 10 утра, оставь в 13:00" = вызов reminder_cancel для 10:00. Без вызова reminder_cancel — ЗАПРЕЩЕНО отвечать что удалил.
 Правило: при извлечении текста со скриншота или фото — ВСЕГДА сохраняй эмодзи которые видны на изображении. Не пропускай их. Лимит 1-2 эмодзи на ответ НЕ распространяется на эмодзи извлеченные с фото.
@@ -795,7 +813,7 @@ TOOLS = [
     },
     {
         "name": "morning_digest_toggle",
-        "description": "Включает или отключает утренний дайджест (погода, события, задачи). Используй когда пользователь просит 'отключи дайджест', 'не присылай больше', 'верни дайджест', 'включи обратно'. ОБЯЗАТЕЛЬНО вызови этот инструмент — нельзя просто сказать что отключил, не вызвав его.",
+        "description": "Включает или отключает утренний дайджест. ОБЯЗАТЕЛЬНО вызови этот инструмент когда пользователь говорит: 'включи дайджест', 'отключи дайджест', 'включи утренний дайджест', 'не присылай больше', 'верни дайджест', 'включи обратно', 'выключи'. Нельзя просто ответить словами — всегда вызывай инструмент.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -819,6 +837,18 @@ TOOLS = [
                 "minute": {"type": "integer", "description": "Минуты (0-59), по умолчанию 0"}
             },
             "required": ["hour"]
+        }
+    },
+    {
+        "name": "morning_digest_section",
+        "description": "Добавляет или убирает раздел из утреннего дайджеста. Используй когда пользователь говорит 'добавь погоду в дайджест', 'убери задачи', 'хочу видеть события из календаря' и т.п. ОБЯЗАТЕЛЬНО вызови инструмент — нельзя просто сказать что добавил.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["weather", "calendar", "tasks"], "description": "weather=погода, calendar=события Google Calendar, tasks=задачи"},
+                "enabled": {"type": "boolean", "description": "true — добавить раздел, false — убрать"}
+            },
+            "required": ["section", "enabled"]
         }
     },
     {
@@ -1707,7 +1737,14 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         enabled = bool(tool_input.get("enabled"))
         set_morning_digest(user_id, enabled)
         h, m = get_digest_time(user_id)
-        return f"Утренний дайджест включён ({h}:{m:02d})." if enabled else "Утренний дайджест отключён."
+        if enabled:
+            sections = get_digest_sections(user_id)
+            any_on = any(sections.get(s) for s in ("weather", "calendar", "tasks"))
+            if not any_on:
+                return f"Дайджест включен ({h}:{m:02d})! Что добавить? Доступно: погода, события из Google Calendar, задачи."
+            return f"Утренний дайджест включён ({h}:{m:02d})."
+        else:
+            return "Утренний дайджест отключён. Разделы сохранены — скажи «включи», чтобы продолжить."
 
     if name == "morning_digest_status":
         h, m = get_digest_time(user_id)
@@ -1720,6 +1757,14 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return "Некорректное время."
         set_digest_time(user_id, hour, minute)
         return f"Время дайджеста изменено на {hour}:{minute:02d}."
+
+    if name == "morning_digest_section":
+        section = tool_input["section"]
+        enabled = bool(tool_input["enabled"])
+        set_digest_section(user_id, section, enabled)
+        names = {"weather": "Погода", "calendar": "Календарь", "tasks": "Задачи"}
+        action = "добавлена" if enabled else "убрана"
+        return f"{'✅' if enabled else '❌'} {names.get(section, section)} {action} из дайджеста."
 
     if name == "alert_price_set":
         try:
@@ -3136,6 +3181,14 @@ async def check_morning_digest(context):
 async def send_morning_digest(context):
     user_id = 661638470
     try:
+        sections = get_digest_sections(user_id)
+        show_weather = sections.get("weather", False)
+        show_calendar = sections.get("calendar", False)
+        show_tasks = sections.get("tasks", False)
+
+        if not show_weather and not show_calendar and not show_tasks:
+            return
+
         now = now_local()
         days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
         months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
@@ -3143,91 +3196,95 @@ async def send_morning_digest(context):
         lines = [f"Привет! Сегодня {date_str}", ""]
 
         # Погода — текущая + прогноз на день
-        try:
-            api_key = os.getenv("OPENWEATHER_API_KEY")
-            resp = requests.get("https://api.openweathermap.org/data/2.5/weather",
-                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru"}, timeout=10)
-            w = resp.json()
-            desc = w["weather"][0]["description"].capitalize()
-            temp = w["main"]["temp"]
-            feels = w["main"]["feels_like"]
-            wind = w["wind"]["speed"]
-            icon = _weather_icon(desc)
-            lines.append(f"{icon} Погода: {desc}, {temp:.0f}°C (ощущается {feels:.0f}°C), ветер {wind:.0f} м/с")
+        if show_weather:
+            try:
+                api_key = os.getenv("OPENWEATHER_API_KEY")
+                resp = requests.get("https://api.openweathermap.org/data/2.5/weather",
+                    params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru"}, timeout=10)
+                w = resp.json()
+                desc = w["weather"][0]["description"].capitalize()
+                temp = w["main"]["temp"]
+                feels = w["main"]["feels_like"]
+                wind = w["wind"]["speed"]
+                icon = _weather_icon(desc)
+                lines.append(f"{icon} Погода: {desc}, {temp:.0f}°C (ощущается {feels:.0f}°C), ветер {wind:.0f} м/с")
 
-            # Прогноз на день — мин/макс и осадки
-            resp2 = requests.get("https://api.openweathermap.org/data/2.5/forecast",
-                params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8}, timeout=10)
-            forecast = resp2.json()
-            # Только дневные интервалы 7:00–21:00
-            day_items = [i for i in forecast["list"]
-                         if 7 <= datetime.fromisoformat(i["dt_txt"].replace(" ", "T")).hour <= 21]
-            if not day_items:
-                day_items = forecast["list"]
-            temps = [i["main"]["temp"] for i in day_items]
-            t_min, t_max = min(temps), max(temps)
-            # Осадки только если вероятность >= 40% (pop = 0..1)
-            rain = any(
-                ("дождь" in i["weather"][0]["description"] or "rain" in i["weather"][0]["description"] or "ливень" in i["weather"][0]["description"])
-                and i.get("pop", 0) >= 0.4
-                for i in day_items
-            )
-            snow = any(
-                ("снег" in i["weather"][0]["description"] or "snow" in i["weather"][0]["description"])
-                and i.get("pop", 0) >= 0.4
-                for i in day_items
-            )
-            precip = "Ожидается дождь, зонт пригодится." if rain else ("Ожидается снег." if snow else "Осадков не ожидается.")
-            lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}°C. {precip}")
-            tip = _weather_tip(desc, temp, wind)
-            if tip:
-                lines.append(tip)
-            lines.append("")
-        except:
-            pass
+                # Прогноз на день — мин/макс и осадки
+                resp2 = requests.get("https://api.openweathermap.org/data/2.5/forecast",
+                    params={"q": "Almaty", "appid": api_key, "units": "metric", "lang": "ru", "cnt": 8}, timeout=10)
+                forecast = resp2.json()
+                day_items = [i for i in forecast["list"]
+                             if 7 <= datetime.fromisoformat(i["dt_txt"].replace(" ", "T")).hour <= 21]
+                if not day_items:
+                    day_items = forecast["list"]
+                temps = [i["main"]["temp"] for i in day_items]
+                t_min, t_max = min(temps), max(temps)
+                rain = any(
+                    ("дождь" in i["weather"][0]["description"] or "rain" in i["weather"][0]["description"] or "ливень" in i["weather"][0]["description"])
+                    and i.get("pop", 0) >= 0.4
+                    for i in day_items
+                )
+                snow = any(
+                    ("снег" in i["weather"][0]["description"] or "snow" in i["weather"][0]["description"])
+                    and i.get("pop", 0) >= 0.4
+                    for i in day_items
+                )
+                precip = "Ожидается дождь, зонт пригодится." if rain else ("Ожидается снег." if snow else "Осадков не ожидается.")
+                lines.append(f"Днём от {t_min:.0f} до {t_max:.0f}°C. {precip}")
+                tip = _weather_tip(desc, temp, wind)
+                if tip:
+                    lines.append(tip)
+                lines.append("")
+            except Exception:
+                pass
 
         # События на сегодня
-        try:
-            service = get_calendar_service()
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-            result = service.events().list(
-                calendarId="primary",
-                timeMin=start.isoformat(),
-                timeMax=end.isoformat(),
-                maxResults=10, singleEvents=True, orderBy="startTime"
-            ).execute()
-            events = result.get("items", [])
-            if events:
-                lines.append("События:")
-                for e in events:
-                    start_t = e["start"].get("dateTime", e["start"].get("date", ""))
-                    if "T" in start_t:
-                        t = datetime.fromisoformat(start_t).strftime("%H:%M")
-                        lines.append(f"• {t} — {e['summary']}")
-                    else:
-                        lines.append(f"• {e['summary']}")
-                lines.append("")
-        except:
-            pass
+        if show_calendar:
+            try:
+                service = get_calendar_service()
+                start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+                result = service.events().list(
+                    calendarId="primary",
+                    timeMin=start.isoformat(),
+                    timeMax=end.isoformat(),
+                    maxResults=10, singleEvents=True, orderBy="startTime"
+                ).execute()
+                events = result.get("items", [])
+                if events:
+                    lines.append("События:")
+                    for e in events:
+                        start_t = e["start"].get("dateTime", e["start"].get("date", ""))
+                        if "T" in start_t:
+                            t = datetime.fromisoformat(start_t).strftime("%H:%M")
+                            lines.append(f"• {t} — {e['summary']}")
+                        else:
+                            lines.append(f"• {e['summary']}")
+                    lines.append("")
+            except Exception:
+                pass
 
         # Задачи (только список "Задачи", невыполненные)
-        try:
-            service = get_tasks_service()
-            lists = service.tasklists().list().execute().get("items", [])
-            task_lines = []
-            for tl in lists:
-                if "задач" in tl["title"].lower() or tl == lists[0]:
-                    tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
-                    for t in tasks:
-                        if t.get("status") != "completed":
-                            task_lines.append(f"• {t['title']}")
-                    break
-            if task_lines:
-                lines.append("Задачи:")
-                lines.extend(task_lines[:10])
-        except:
-            pass
+        if show_tasks:
+            try:
+                service = get_tasks_service()
+                lists = service.tasklists().list().execute().get("items", [])
+                task_lines = []
+                for tl in lists:
+                    if "задач" in tl["title"].lower() or tl == lists[0]:
+                        tasks = service.tasks().list(tasklist=tl["id"]).execute().get("items", [])
+                        for t in tasks:
+                            if t.get("status") != "completed":
+                                task_lines.append(f"• {t['title']}")
+                        break
+                if task_lines:
+                    lines.append("Задачи:")
+                    lines.extend(task_lines[:10])
+            except Exception:
+                pass
+
+        if len(lines) <= 2:
+            return
 
         morning_text = "\n".join(lines)
         await context.bot.send_message(chat_id=user_id, text=morning_text, disable_web_page_preview=True)
