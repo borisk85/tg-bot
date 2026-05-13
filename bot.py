@@ -1741,7 +1741,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             sections = get_digest_sections(user_id)
             any_on = any(sections.get(s) for s in ("weather", "calendar", "tasks"))
             if not any_on:
-                return f"Дайджест включен ({h}:{m:02d})! Что добавить? Доступно: погода, события из Google Calendar, задачи."
+                return f"Дайджест включен ({h}:{m:02d})! Что добавить?"
             return f"Утренний дайджест включён ({h}:{m:02d})."
         else:
             return "Утренний дайджест отключён. Разделы сохранены — скажи «включи», чтобы продолжить."
