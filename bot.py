@@ -104,6 +104,16 @@ def save_price_alerts(user_id: int, alerts: list):
     if redis_client:
         redis_client.set(f"price_alerts:{user_id}", json.dumps(alerts, ensure_ascii=False))
 
+def get_digest_tokens(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"digest_tokens:{user_id}")
+        return json.loads(data) if data else []
+    return []
+
+def save_digest_tokens(user_id: int, tokens: list):
+    if redis_client:
+        redis_client.set(f"digest_tokens:{user_id}", json.dumps(tokens, ensure_ascii=False))
+
 def get_user_memory(user_id: int) -> list:
     if redis_client:
         data = redis_client.get(f"memory:{user_id}")
@@ -841,7 +851,7 @@ TOOLS = [
     },
     {
         "name": "morning_digest_section",
-        "description": "Добавляет или убирает раздел из утреннего дайджеста. Используй когда пользователь говорит 'добавь погоду в дайджест', 'убери задачи', 'хочу видеть события из календаря' и т.п. ОБЯЗАТЕЛЬНО вызови инструмент — нельзя просто сказать что добавил.",
+        "description": "Добавляет или убирает раздел из утреннего дайджеста. Используй когда пользователь говорит 'добавь погоду в дайджест', 'убери задачи', 'хочу видеть события из календаря' и т.п. ОБЯЗАТЕЛЬНО вызови инструмент — нельзя просто сказать что добавил. Для крипто-токенов и активов используй morning_digest_token, не этот инструмент.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -849,6 +859,19 @@ TOOLS = [
                 "enabled": {"type": "boolean", "description": "true — добавить раздел, false — убрать"}
             },
             "required": ["section", "enabled"]
+        }
+    },
+    {
+        "name": "morning_digest_token",
+        "description": "Добавляет или убирает крипто-токен из утреннего дайджеста. Используй когда пользователь хочет отслеживать цену токена каждое утро: адрес контракта (pump.fun, Solana, EVM) или тикер (BTC, ETH, SOL). ОБЯЗАТЕЛЬНО вызови инструмент — нельзя говорить 'добавил в дайджест' без вызова этого инструмента.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address_or_ticker": {"type": "string", "description": "Адрес контракта токена или тикер"},
+                "name": {"type": "string", "description": "Название или символ токена для отображения"},
+                "enabled": {"type": "boolean", "description": "true — добавить, false — убрать из дайджеста"}
+            },
+            "required": ["address_or_ticker", "enabled"]
         }
     },
     {
@@ -1765,6 +1788,23 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         names = {"weather": "Погода", "calendar": "Календарь", "tasks": "Задачи"}
         action = "добавлена" if enabled else "убрана"
         return f"{'✅' if enabled else '❌'} {names.get(section, section)} {action} из дайджеста."
+
+    if name == "morning_digest_token":
+        addr = tool_input["address_or_ticker"].strip()
+        token_name = tool_input.get("name", addr)
+        enabled = bool(tool_input["enabled"])
+        tokens = get_digest_tokens(user_id)
+        if enabled:
+            existing = [t for t in tokens if t["address"].lower() == addr.lower()]
+            if not existing:
+                tokens.append({"address": addr, "name": token_name})
+                save_digest_tokens(user_id, tokens)
+                return f"✅ {token_name} добавлен в утренний дайджест — цена будет приходить каждое утро."
+            return f"✅ {token_name} уже в дайджесте."
+        else:
+            tokens = [t for t in tokens if t["address"].lower() != addr.lower()]
+            save_digest_tokens(user_id, tokens)
+            return f"❌ {token_name} убран из дайджеста."
 
     if name == "alert_price_set":
         try:
@@ -3282,6 +3322,44 @@ async def send_morning_digest(context):
                     lines.extend(task_lines[:10])
             except Exception:
                 pass
+
+        # Крипто-активы из digest_tokens
+        digest_tokens = get_digest_tokens(user_id)
+        if digest_tokens:
+            token_lines = []
+            for token in digest_tokens:
+                try:
+                    addr = token["address"]
+                    tname = token.get("name", addr[:8])
+                    is_contract = bool(
+                        re.match(r"^0x[0-9a-fA-F]{40}$", addr) or
+                        re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,48}$", addr)
+                    )
+                    if is_contract:
+                        resp = requests.get(
+                            f"https://api.dexscreener.com/latest/dex/tokens/{addr}",
+                            headers={"Accept": "application/json"}, timeout=8
+                        )
+                        data = resp.json()
+                        pairs = data.get("pairs") or []
+                        if pairs:
+                            p = max(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0))
+                            price = float(p.get("priceUsd", 0))
+                            change = p.get("priceChange", {}).get("h24", 0) or 0
+                            sym = p.get("baseToken", {}).get("symbol", tname)
+                            arrow = "📈" if float(change) >= 0 else "📉"
+                            sign = "+" if float(change) >= 0 else ""
+                            token_lines.append(f"{arrow} {sym}: ${price:.8f} ({sign}{change}% 24ч)")
+                    else:
+                        price = fetch_asset_price(addr.upper())
+                        if price is not None:
+                            token_lines.append(f"💰 {addr.upper()}: ${price:,.4f}")
+                except Exception:
+                    pass
+            if token_lines:
+                lines.append("Активы:")
+                lines.extend(token_lines)
+                lines.append("")
 
         if len(lines) <= 2:
             return
