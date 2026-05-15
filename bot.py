@@ -213,17 +213,15 @@ def set_digest_time(user_id: int, hour: int, minute: int):
         redis_client.set(f"digest_time:{user_id}", f"{hour}:{minute:02d}")
 
 def get_digest_sections(user_id: int) -> dict:
-    """Возвращает включенные секции дайджеста. По умолчанию все включены."""
+    """Возвращает включенные секции дайджеста. По умолчанию все выключены (opt-in)."""
     if redis_client:
         v = redis_client.get(f"digest_sections:{user_id}")
         if v:
             try:
-                data = json.loads(v)
-                if data:
-                    return data
+                return json.loads(v)
             except Exception:
                 pass
-    return {"weather": True, "calendar": True, "tasks": True}
+    return {}
 
 def set_digest_section(user_id: int, section: str, enabled: bool):
     sections = get_digest_sections(user_id)
@@ -3228,7 +3226,12 @@ async def send_morning_digest(context):
         show_calendar = sections.get("calendar", False)
         show_tasks = sections.get("tasks", False)
 
-        if not show_weather and not show_calendar and not show_tasks:
+        tokens = get_digest_tokens(user_id)
+        if not show_weather and not show_calendar and not show_tasks and not tokens:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="Доброе утро! Дайджест включен, но ничего не добавлено.\n\nЧто добавить? Напиши, например:\n• «добавь погоду»\n• «добавь BTC и ETH»\n• «добавь напоминания»"
+            )
             return
 
         now = now_local()
