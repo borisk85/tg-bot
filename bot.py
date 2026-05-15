@@ -1765,13 +1765,13 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             any_on = any(sections.get(s) for s in ("weather", "calendar", "tasks"))
             if not any_on:
                 return f"Дайджест включен ({h}:{m:02d})! Что добавить?"
-            return f"Утренний дайджест включён ({h}:{m:02d})."
+            return f"Утренний дайджест включен ({h}:{m:02d})."
         else:
-            return "Утренний дайджест отключён. Разделы сохранены — скажи «включи», чтобы продолжить."
+            return "Утренний дайджест отключен. Разделы сохранены — скажи «включи», чтобы продолжить."
 
     if name == "morning_digest_status":
         h, m = get_digest_time(user_id)
-        return f"Утренний дайджест: включён ({h}:{m:02d})." if is_morning_digest_enabled(user_id) else "Утренний дайджест: отключён."
+        return f"Утренний дайджест: включен ({h}:{m:02d})." if is_morning_digest_enabled(user_id) else "Утренний дайджест: отключен."
 
     if name == "morning_digest_set_time":
         hour = tool_input["hour"]
@@ -2122,9 +2122,9 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 if first_idx == 0:
                     after_rain = next((s for s in slots[first_idx:] if s["pop"] < threshold), None)
                     if after_rain:
-                        return f"🌧 Дождь идёт, закончится около {after_rain['time']}."
-                    return f"🌧 Дождь идёт и продлится до конца дня."
-                return f"🌧 Дождь начнётся около {first['time']}, до этого сухо."
+                        return f"🌧 Дождь идет, закончится около {after_rain['time']}."
+                    return f"🌧 Дождь идет и продлится до конца дня."
+                return f"🌧 Дождь начнется около {first['time']}, до этого сухо."
 
             if forecast_days and forecast_days > 0:
                 # Прогноз — показываем ТОЛЬКО прогноз без текущей погоды
