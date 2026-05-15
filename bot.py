@@ -213,15 +213,17 @@ def set_digest_time(user_id: int, hour: int, minute: int):
         redis_client.set(f"digest_time:{user_id}", f"{hour}:{minute:02d}")
 
 def get_digest_sections(user_id: int) -> dict:
-    """Возвращает включенные секции дайджеста. По умолчанию все выключены."""
+    """Возвращает включенные секции дайджеста. По умолчанию все включены."""
     if redis_client:
         v = redis_client.get(f"digest_sections:{user_id}")
         if v:
             try:
-                return json.loads(v)
+                data = json.loads(v)
+                if data:
+                    return data
             except Exception:
                 pass
-    return {}
+    return {"weather": True, "calendar": True, "tasks": True}
 
 def set_digest_section(user_id: int, section: str, enabled: bool):
     sections = get_digest_sections(user_id)
