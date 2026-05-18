@@ -456,6 +456,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 
 Правило: когда пользователь присылает URL сайта и просит прочитать, резюмировать или проанализировать — используй read_webpage. Не говори "не могу читать JS-сайты" — read_webpage справляется с React/Next.js. open_url использовать только для confirmation/verification ссылок из писем.
 
+Правило: МЕСТА И ЗАВЕДЕНИЯ — для поиска ресторанов, кафе, спа, парков, достопримечательностей, магазинов, аптек и любых других мест — ВСЕГДА используй find_places. Если пользователь говорит "рядом со мной", "рядом", "поблизости" — передавай use_saved_location=true и sort_by_distance=true (если нет слова "лучшие"). Если есть слово "лучшие" или "топ" — use_saved_location=true но sort_by_distance=false (рейтинг важнее). Результат выводи ДОСЛОВНО. Никогда не используй web_search для поиска мест.
+
 Правило: АВИАБИЛЕТЫ — для поиска рейсов, перелетов и авиабилетов ВСЕГДА используй search_flights, не web_search. Инструмент работает для ЛЮБЫХ маршрутов — и международных, и внутренних (например Алматы → Астана). "Туда и обратно" → один вызов с round_trip=true. Результат search_flights — выводи ДОСЛОВНО, без изменений, сокращений и пересказа.
 
 Правило: ФАКТИЧЕСКИЕ ДАННЫЕ — НИКОГДА не называй конкретные цифры (время в пути, расстояния, расписания, тарифы, цены) из головы если не уверен на 100%. Варианты: (1) используй web_search чтобы найти реальные данные, (2) скажи "не знаю точно — проверь в Яндекс Картах / Google Maps / официальном источнике". Уверенный неправильный ответ хуже честного "не знаю". Пример: время в пути Костанай → Алматы — не угадывай, ищи или признай незнание.
@@ -1094,6 +1096,31 @@ TOOLS = [
                 "url": {"type": "string", "description": "URL страницы для чтения"}
             },
             "required": ["url"]
+        }
+    },
+    {
+        "name": "find_places",
+        "description": (
+            "Найти места: рестораны, кафе, спа, парки, достопримечательности, магазины, аптеки и т.д. "
+            "Вызывай при запросах 'найди', 'покажи', 'посоветуй', 'топ', 'лучшие' + тип места + город/рядом. "
+            "По умолчанию возвращай 3 результата."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Что искать: тип места. Примеры: 'рестораны', 'спа', 'парки', 'аптеки'"},
+                "location": {"type": "string", "description": "Город или район. Если указан use_saved_location — не нужен."},
+                "limit": {"type": "integer", "description": "Число результатов 1-5. По умолчанию 3."},
+                "use_saved_location": {
+                    "type": "boolean",
+                    "description": "true — использовать сохраненную геолокацию. Если пользователь говорит 'рядом со мной', 'рядом', 'поблизости'."
+                },
+                "sort_by_distance": {
+                    "type": "boolean",
+                    "description": "true — сортировать по расстоянию. Только когда НЕТ слов 'лучшие', 'топ'. Если есть 'лучшие' — не передавать."
+                },
+            },
+            "required": ["query"],
         }
     },
     {
@@ -2559,6 +2586,94 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         except Exception as e:
             return f"Ошибка поиска рейсов: {e}"
 
+    if name == "find_places":
+        try:
+            import httpx as _httpx
+            api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+            if not api_key:
+                return "Модуль «Путеводитель» временно недоступен."
+
+            _PLACES_BLOCKED = {
+                "наркотик", "наркота", "притон", "бордель", "проститут",
+                "эскорт услуг", "оружие", "огнестрел", "нелегальн",
+            }
+            q_lower = tool_input.get("query", "").lower()
+            if any(kw in q_lower for kw in _PLACES_BLOCKED):
+                return "Это не в моей компетенции — такие запросы я не обрабатываю."
+
+            lat = lon = None
+            if tool_input.get("use_saved_location") and redis_client:
+                loc_raw = redis_client.get(f"places_location:{user_id}")
+                if loc_raw:
+                    try:
+                        lat, lon = map(float, loc_raw.split(","))
+                    except Exception:
+                        pass
+                if lat is None:
+                    return "Геолокация не найдена. Поделись своим местоположением через Telegram — нажми 📎 → Геопозиция, а затем повтори запрос."
+
+            requested = tool_input.get("limit", 3)
+            limit = max(1, min(5, requested))
+            over_limit = requested > 5
+
+            query = tool_input["query"]
+            location = tool_input.get("location")
+            text_query = f"{query} {location}".strip() if location else query
+            sort_by_distance = bool(tool_input.get("sort_by_distance", False))
+
+            body: dict = {"textQuery": text_query, "maxResultCount": limit}
+            if lat is not None and lon is not None:
+                body["locationBias"] = {
+                    "circle": {
+                        "center": {"latitude": lat, "longitude": lon},
+                        "radius": 2000.0,
+                    }
+                }
+                if sort_by_distance:
+                    body["rankPreference"] = "DISTANCE"
+
+            async with _httpx.AsyncClient(timeout=10) as _c:
+                resp = await _c.post(
+                    "https://places.googleapis.com/v1/places:searchText",
+                    headers={
+                        "X-Goog-Api-Key": api_key,
+                        "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+            data = resp.json()
+            places = data.get("places", [])
+            if not places:
+                return f"По запросу «{text_query}» ничего не найдено. Попробуй другой запрос или уточни город."
+
+            lines = []
+            for i, p in enumerate(places, 1):
+                name_txt = p.get("displayName", {}).get("text", "Без названия")
+                rating = p.get("rating")
+                reviews = p.get("userRatingCount")
+                address = p.get("formattedAddress", "")
+                maps_url = p.get("googleMapsUri", "")
+                addr_short = ", ".join(address.split(",")[:2]) if address else ""
+
+                line = f"{i}. <b>{name_txt}</b>"
+                if rating:
+                    line += f"\n   ⭐ {rating}"
+                    if reviews:
+                        line += f" ({reviews} отзывов)"
+                if addr_short:
+                    line += f"\n   {addr_short}"
+                if maps_url:
+                    line += f"\n   📍 {maps_url}"
+                lines.append(line)
+
+            result = "\n\n".join(lines)
+            if over_limit:
+                result = f"Могу показать максимум топ-5. Вот лучшие:\n\n{result}"
+            return result
+        except Exception as e:
+            return f"Ошибка при поиске мест: {e}"
+
     return f"[Инструмент '{name}' не найден]"
 
 # ── Agent loop ────────────────────────────────────────────────────────────────
@@ -2678,8 +2793,9 @@ async def _send_reply(reply: str, message):
                 reply_markup=keyboard if i == 0 else None
             )
     else:
+        pm = "HTML" if "<b>" in reply and "</b>" in reply else None
         for i in range(0, len(reply), 4096):
-            await message.reply_text(reply[i:i + 4096])
+            await message.reply_text(reply[i:i + 4096], parse_mode=pm, disable_web_page_preview=True)
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -3504,6 +3620,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "— подсчет ккал по фото еды или блюда\n\n"
         "✈️ Поиск авиабилетов\n"
         "— цены на рейсы в нужные даты по всему миру\n\n"
+        "🗺 Путеводитель\n"
+        "— рестораны, спа, парки, аптеки рядом или в любом городе\n\n"
         "🧠 Долгосрочная память\n"
         "— запоминаю факты из бесед между сессиями\n\n"
         "🌅 Утренний дайджест\n"
@@ -3723,6 +3841,15 @@ async def _process_media_group(group_id: str, context):
             await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
         else:
             await update.message.reply_text("Произошла ошибка. Попробуй еще раз.")
+
+@authorized
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохраняет геолокацию в Redis для использования find_places."""
+    user_id = update.effective_user.id
+    loc = update.message.location
+    if loc and redis_client:
+        redis_client.setex(f"places_location:{user_id}", 86400, f"{loc.latitude},{loc.longitude}")
+    await update.message.reply_text("📍 Геолокация сохранена. Теперь можешь спрашивать что рядом.")
 
 @authorized
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4027,6 +4154,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     # Регистрируем команды в меню Telegram
