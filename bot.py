@@ -2610,7 +2610,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     except Exception:
                         pass
                 if lat is None:
-                    return "Геолокация не найдена. Поделись своим местоположением через Telegram — нажми 📎 → Геопозиция, а затем повтори запрос."
+                    return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь. После этого повтори запрос."
 
             requested = tool_input.get("limit", 3)
             limit = max(1, min(5, requested))
