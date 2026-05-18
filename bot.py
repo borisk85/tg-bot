@@ -2648,7 +2648,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         break
 
     set_history(user_id, serialize_messages(messages))
-    return "Не удалось получить ответ."
+    return "Готово."
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
