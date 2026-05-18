@@ -2341,17 +2341,44 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
     if name == "web_search":
         try:
+            import re as _re
             query = tool_input["query"]
+            _WS_NEWS_KW = {
+                "новости", "новость", "пишут", "пишет", "написали", "написано",
+                "говорят", "говорит", "сказали", "говорили",
+                "произошло", "случилось", "случается", "происходит",
+                "аналитика", "прогноз", "эксперты", "ситуация", "обзор",
+                "правда", "тренд", "известно", "нового", "слышно",
+                "думают", "считают", "обсуждают",
+                "сообщают", "сообщили", "заявили", "объявили", "рассказали",
+                "выяснилось", "стало известно",
+                "скандал", "хайп", "шум", "в сети", "trending",
+                "обновления", "последнее", "появилось", "вышло",
+            }
+            def _strip_html(text: str) -> str:
+                return _re.sub(r"<[^>]+>", "", text).strip()
+            query_lower = query.lower()
+            is_news = any(kw in query_lower for kw in _WS_NEWS_KW)
+            params: dict = {"q": query, "count": 5}
+            if is_news:
+                params["freshness"] = "pw"
             headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": os.getenv("BRAVE_API_KEY")}
-            resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params={"q": query, "count": 5})
-            data = resp.json()
-            results = data.get("web", {}).get("results", [])
+            resp = requests.get("https://api.search.brave.com/res/v1/web/search", headers=headers, params=params, timeout=12)
+            results = resp.json().get("web", {}).get("results", [])
             if not results:
                 return "Ничего не найдено."
-            output = []
-            for r in results[:5]:
-                output.append(f"**{r['title']}**\n{r.get('description', '')}\n{r['url']}")
-            return "\n\n".join(output)
+            filtered = [r for r in results if not _strip_html(r.get("title", "")).startswith(("Видео.", "Video."))]
+            if not filtered:
+                return "Ничего не найдено."
+            lines = [f"Результаты поиска «{query}»:\n"]
+            for i, r in enumerate(filtered[:5], 1):
+                title = _strip_html(r.get("title", ""))
+                desc = _strip_html(r.get("description", ""))
+                if len(desc) > 120:
+                    desc = desc[:117].rstrip() + "..."
+                url = r.get("url", "")
+                lines.append(f"{i}. {title}\n{desc}\n{url}")
+            return "\n\n".join(lines)
         except Exception as e:
             return f"Ошибка поиска: {e}"
 
