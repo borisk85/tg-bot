@@ -2606,6 +2606,8 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         memory_lines = "\n".join(f"• {m['key']}: {m['value']}" for m in memories)
         system += f"\n\nДолгосрочная память о пользователе (факты из прошлых сессий):\n{memory_lines}"
 
+    last_tool_result = ""
+
     for _ in range(10):
         response = anthropic.messages.create(
             model="claude-sonnet-4-6",
@@ -2624,7 +2626,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
                 if hasattr(block, "text")
             )
             set_history(user_id, serialize_messages(messages))
-            return text or "Готово."
+            return text or last_tool_result or "Готово."
 
         if response.stop_reason == "tool_use":
             tool_results = []
@@ -2637,6 +2639,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
                         url = result[len("IMAGE_URL:"):]
                         await send_photo(url)
                         result = "Изображение сгенерировано и отправлено."
+                    last_tool_result = result
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -2645,10 +2648,18 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
             messages.append({"role": "user", "content": tool_results})
             continue
 
+        # max_tokens или другой stop_reason — извлекаем частичный текст
+        partial_text = "".join(
+            block.text for block in assistant_content
+            if hasattr(block, "text")
+        )
+        if partial_text:
+            set_history(user_id, serialize_messages(messages))
+            return partial_text
         break
 
     set_history(user_id, serialize_messages(messages))
-    return "Готово."
+    return last_tool_result or "Готово."
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
