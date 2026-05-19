@@ -2601,36 +2601,39 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             if any(kw in q_lower for kw in _PLACES_BLOCKED):
                 return "Это не в моей компетенции — такие запросы я не обрабатываю."
 
-            lat = lon = None
-            if tool_input.get("use_saved_location") and redis_client:
-                loc_raw = redis_client.get(f"places_location:{user_id}")
-                if loc_raw:
-                    try:
-                        lat, lon = map(float, loc_raw.split(","))
-                    except Exception:
-                        pass
-                if lat is None:
-                    return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь. После этого повтори запрос."
+            import urllib.parse as _urlparse
+            sort_by_distance = bool(tool_input.get("sort_by_distance", False))
+            query = tool_input["query"]
 
+            # «Рядом» (без «лучшие/топ») — ссылка на Google Maps, без API
+            if sort_by_distance:
+                lat = lon = None
+                if tool_input.get("use_saved_location") and redis_client:
+                    loc_raw = redis_client.get(f"places_location:{user_id}")
+                    if loc_raw:
+                        try:
+                            lat, lon = map(float, loc_raw.split(","))
+                        except Exception:
+                            pass
+                if lat is None:
+                    if redis_client:
+                        import json as _json
+                        pending = {"query": query, "sort_by_distance": True}
+                        redis_client.setex(f"places_pending:{user_id}", 600, _json.dumps(pending))
+                    return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
+                q_enc = _urlparse.quote(query)
+                maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
+                return f"📍 Вот {query} рядом с тобой:\n{maps_url}"
+
+            # «Лучшие/топ» — Google Places API с рейтингами
             requested = tool_input.get("limit", 3)
             limit = max(1, min(5, requested))
             over_limit = requested > 5
 
-            query = tool_input["query"]
             location = tool_input.get("location")
             text_query = f"{query} {location}".strip() if location else query
-            sort_by_distance = bool(tool_input.get("sort_by_distance", False))
 
             body: dict = {"textQuery": text_query, "maxResultCount": limit}
-            if lat is not None and lon is not None:
-                body["locationBias"] = {
-                    "circle": {
-                        "center": {"latitude": lat, "longitude": lon},
-                        "radius": 2000.0,
-                    }
-                }
-                if sort_by_distance:
-                    body["rankPreference"] = "DISTANCE"
 
             async with _httpx.AsyncClient(timeout=10) as _c:
                 resp = await _c.post(
@@ -2653,7 +2656,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 rating = p.get("rating")
                 reviews = p.get("userRatingCount")
                 address = p.get("formattedAddress", "")
-                maps_url = p.get("googleMapsUri", "")
+                maps_url_p = p.get("googleMapsUri", "")
                 addr_short = ", ".join(address.split(",")[:2]) if address else ""
 
                 line = f"{i}. <b>{name_txt}</b>"
@@ -2663,8 +2666,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                         line += f" ({reviews} отзывов)"
                 if addr_short:
                     line += f"\n   {addr_short}"
-                if maps_url:
-                    line += f"\n   📍 {maps_url}"
+                if maps_url_p:
+                    line += f"\n   📍 {maps_url_p}"
                 lines.append(line)
 
             result = "\n\n".join(lines)
@@ -3845,11 +3848,50 @@ async def _process_media_group(group_id: str, context):
 @authorized
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет геолокацию в Redis для использования find_places."""
+    import json as _json, urllib.parse as _up
     user_id = update.effective_user.id
     loc = update.message.location
-    if loc and redis_client:
-        redis_client.setex(f"places_location:{user_id}", 86400, f"{loc.latitude},{loc.longitude}")
-    await update.message.reply_text("📍 Геолокация сохранена. Теперь можешь спрашивать что рядом.")
+    if not loc or not redis_client:
+        return
+    lat, lon = loc.latitude, loc.longitude
+    redis_client.setex(f"places_location:{user_id}", 86400, f"{lat},{lon}")
+
+    pending_raw = redis_client.get(f"places_pending:{user_id}")
+    if pending_raw:
+        redis_client.delete(f"places_pending:{user_id}")
+        pending = _json.loads(pending_raw)
+        if pending.get("sort_by_distance"):
+            q_enc = _up.quote(pending["query"])
+            maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
+            await update.message.reply_text(f"📍 Вот {pending['query']} рядом с тобой:\n{maps_url}", disable_web_page_preview=True)
+        else:
+            import httpx as _httpx, os as _os
+            api_key = _os.getenv("GOOGLE_PLACES_API_KEY", "")
+            if api_key:
+                body = {"textQuery": pending["query"], "maxResultCount": pending.get("limit", 3)}
+                async with _httpx.AsyncClient(timeout=10) as _c:
+                    resp = await _c.post(
+                        "https://places.googleapis.com/v1/places:searchText",
+                        headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri", "Content-Type": "application/json"},
+                        json=body,
+                    )
+                places = resp.json().get("places", [])
+                lines = []
+                for i, p in enumerate(places, 1):
+                    n = p.get("displayName", {}).get("text", "?")
+                    r = p.get("rating"); rv = p.get("userRatingCount")
+                    addr = ", ".join(p.get("formattedAddress", "").split(",")[:2])
+                    mu = p.get("googleMapsUri", "")
+                    line = f"{i}. <b>{n}</b>"
+                    if r: line += f"\n   ⭐ {r}" + (f" ({rv} отзывов)" if rv else "")
+                    if addr: line += f"\n   {addr}"
+                    if mu: line += f"\n   📍 {mu}"
+                    lines.append(line)
+                result = "\n\n".join(lines) if lines else "Ничего не найдено."
+                pm = "HTML" if "<b>" in result else None
+                await update.message.reply_text(result, parse_mode=pm, disable_web_page_preview=True)
+    else:
+        await update.message.reply_text("📍 Геолокация сохранена. Если захочешь найти что-то рядом — просто спроси.")
 
 @authorized
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
