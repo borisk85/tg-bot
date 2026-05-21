@@ -2610,23 +2610,23 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             import urllib.parse as _urlparse
             sort_by_distance = bool(tool_input.get("sort_by_distance", False))
             query = tool_input["query"]
+            lat = lon = None
 
-            # «Рядом» (без «лучшие/топ») — ссылка на Google Maps, без API
-            if sort_by_distance:
-                lat = lon = None
-                if tool_input.get("use_saved_location") and redis_client:
-                    loc_raw = redis_client.get(f"places_location:{user_id}")
-                    if loc_raw:
-                        try:
-                            lat, lon = map(float, loc_raw.split(","))
-                        except Exception:
-                            pass
-                if lat is None:
-                    if redis_client:
-                        import json as _json
-                        pending = {"query": query, "sort_by_distance": True}
-                        redis_client.setex(f"places_pending:{user_id}", 600, _json.dumps(pending))
-                    return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
+            # Читаем сохраненную геолокацию для «рядом» и «лучшие рядом»
+            if (sort_by_distance or tool_input.get("use_saved_location")) and redis_client:
+                loc_raw = redis_client.get(f"places_location:{user_id}")
+                if loc_raw:
+                    try:
+                        lat, lon = map(float, loc_raw.split(","))
+                    except Exception:
+                        pass
+
+            if sort_by_distance and lat is None:
+                if redis_client:
+                    import json as _json
+                    pending = {"query": query, "sort_by_distance": True}
+                    redis_client.setex(f"places_pending:{user_id}", 600, _json.dumps(pending))
+                return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
 
             # Places API — для «рядом» (с координатами) и «лучшие/топ»
             requested = tool_input.get("limit", 3)
