@@ -2621,10 +2621,10 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     except Exception:
                         pass
 
-            if sort_by_distance and lat is None:
+            if (sort_by_distance or tool_input.get("use_saved_location")) and lat is None:
                 if redis_client:
                     import json as _json
-                    pending = {"query": query, "sort_by_distance": True}
+                    pending = {"query": query, "sort_by_distance": sort_by_distance, "limit": tool_input.get("limit", 3)}
                     redis_client.setex(f"places_pending:{user_id}", 600, _json.dumps(pending))
                 return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
 
