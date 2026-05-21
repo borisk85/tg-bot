@@ -2653,7 +2653,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             data = resp.json()
             places = data.get("places", [])
             if not places:
-                return f"По запросу «{text_query}» ничего не найдено. Попробуй другой запрос или уточни город."
+                return f"По запросу «{text_query}» ничего не найдено."
 
             import re as _re
             proper_names = _re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', query)
@@ -2661,7 +2661,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 pn_lower = [w.lower() for w in proper_names]
                 places = [p for p in places if any(w in p.get("displayName", {}).get("text", "").lower() for w in pn_lower)]
             if not places:
-                return f"По запросу «{text_query}» ничего не найдено рядом. Попробуй расширить поиск или убери геолокацию."
+                return f"По запросу «{text_query}» ничего не найдено рядом."
             places = places[:limit]
 
             lines = []
