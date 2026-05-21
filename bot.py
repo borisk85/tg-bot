@@ -2636,11 +2636,9 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             location = tool_input.get("location") if not sort_by_distance else None
             text_query = f"{query} {location}".strip() if location else query
 
-            body: dict = {"textQuery": text_query, "maxResultCount": limit}
+            body: dict = {"textQuery": text_query, "maxResultCount": 20}
             if lat is not None and lon is not None:
-                body["locationBias"] = {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 2000.0}}
-                if sort_by_distance:
-                    body["rankPreference"] = "DISTANCE"
+                body["locationBias"] = {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 30000.0}}
 
             async with _httpx.AsyncClient(timeout=10) as _c:
                 resp = await _c.post(
@@ -2656,6 +2654,15 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             places = data.get("places", [])
             if not places:
                 return f"По запросу «{text_query}» ничего не найдено. Попробуй другой запрос или уточни город."
+
+            import re as _re
+            proper_names = _re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', query)
+            if proper_names:
+                pn_lower = [w.lower() for w in proper_names]
+                places = [p for p in places if any(w in p.get("displayName", {}).get("text", "").lower() for w in pn_lower)]
+            if not places:
+                return f"По запросу «{text_query}» ничего не найдено рядом. Попробуй расширить поиск или убери геолокацию."
+            places = places[:limit]
 
             lines = []
             for i, p in enumerate(places, 1):
@@ -3876,23 +3883,30 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import httpx as _httpx, os as _os
         api_key = _os.getenv("GOOGLE_PLACES_API_KEY", "")
         if api_key:
+            _limit = pending.get("limit", 3)
             body = {
                 "textQuery": pending["query"],
-                "maxResultCount": pending.get("limit", 3),
-                "locationBias": {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 2000.0}},
+                "maxResultCount": 20,
+                "locationBias": {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 30000.0}},
             }
-            if pending.get("sort_by_distance"):
-                body["rankPreference"] = "DISTANCE"
             async with _httpx.AsyncClient(timeout=10) as _c:
                 resp = await _c.post(
                     "https://places.googleapis.com/v1/places:searchText",
                     headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri", "Content-Type": "application/json"},
                     json=body,
                 )
+            import re as _re2
             places = resp.json().get("places", [])
-            if places:
-                lines = []
-                for i, p in enumerate(places, 1):
+            pn = _re2.findall(r'\b[A-Z][a-zA-Z]{3,}\b', pending["query"])
+            if pn:
+                pn_l = [w.lower() for w in pn]
+                places = [p for p in places if any(w in p.get("displayName", {}).get("text", "").lower() for w in pn_l)]
+            if not places:
+                await update.message.reply_text(f"По запросу «{pending['query']}» ничего не найдено рядом.")
+                return
+            places = places[:_limit]
+            lines = []
+            for i, p in enumerate(places, 1):
                     n = p.get("displayName", {}).get("text", "?")
                     r = p.get("rating"); rv = p.get("userRatingCount")
                     addr = ", ".join(p.get("formattedAddress", "").split(",")[:2])
