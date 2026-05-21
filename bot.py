@@ -2627,19 +2627,20 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                         pending = {"query": query, "sort_by_distance": True}
                         redis_client.setex(f"places_pending:{user_id}", 600, _json.dumps(pending))
                     return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
-                q_enc = _urlparse.quote(query)
-                maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
-                return f"📍 Вот {query} рядом с тобой:\n{maps_url}"
 
-            # «Лучшие/топ» — Google Places API с рейтингами
+            # Places API — для «рядом» (с координатами) и «лучшие/топ»
             requested = tool_input.get("limit", 3)
             limit = max(1, min(5, requested))
             over_limit = requested > 5
 
-            location = tool_input.get("location")
+            location = tool_input.get("location") if not sort_by_distance else None
             text_query = f"{query} {location}".strip() if location else query
 
             body: dict = {"textQuery": text_query, "maxResultCount": limit}
+            if lat is not None and lon is not None:
+                body["locationBias"] = {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 2000.0}}
+                if sort_by_distance:
+                    body["rankPreference"] = "DISTANCE"
 
             async with _httpx.AsyncClient(timeout=10) as _c:
                 resp = await _c.post(
