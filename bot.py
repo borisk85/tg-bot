@@ -3862,26 +3862,34 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lat, lon = loc.latitude, loc.longitude
     redis_client.setex(f"places_location:{user_id}", 86400, f"{lat},{lon}")
 
+    # Дедупликация — защита от двойных событий геолокации (live location и т.п.)
+    ack_key = f"places_loc_ack:{user_id}"
+    if redis_client.get(ack_key):
+        return
+    redis_client.setex(ack_key, 3, "1")
+
     pending_raw = redis_client.get(f"places_pending:{user_id}")
     if pending_raw:
         redis_client.delete(f"places_pending:{user_id}")
         pending = _json.loads(pending_raw)
-        if pending.get("sort_by_distance"):
-            q_enc = _up.quote(pending["query"])
-            maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
-            await update.message.reply_text(f"📍 Вот {pending['query']} рядом с тобой:\n{maps_url}", disable_web_page_preview=True)
-        else:
-            import httpx as _httpx, os as _os
-            api_key = _os.getenv("GOOGLE_PLACES_API_KEY", "")
-            if api_key:
-                body = {"textQuery": pending["query"], "maxResultCount": pending.get("limit", 3)}
-                async with _httpx.AsyncClient(timeout=10) as _c:
-                    resp = await _c.post(
-                        "https://places.googleapis.com/v1/places:searchText",
-                        headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri", "Content-Type": "application/json"},
-                        json=body,
-                    )
-                places = resp.json().get("places", [])
+        import httpx as _httpx, os as _os
+        api_key = _os.getenv("GOOGLE_PLACES_API_KEY", "")
+        if api_key:
+            body = {
+                "textQuery": pending["query"],
+                "maxResultCount": pending.get("limit", 3),
+                "locationBias": {"circle": {"center": {"latitude": lat, "longitude": lon}, "radius": 2000.0}},
+            }
+            if pending.get("sort_by_distance"):
+                body["rankPreference"] = "DISTANCE"
+            async with _httpx.AsyncClient(timeout=10) as _c:
+                resp = await _c.post(
+                    "https://places.googleapis.com/v1/places:searchText",
+                    headers={"X-Goog-Api-Key": api_key, "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri", "Content-Type": "application/json"},
+                    json=body,
+                )
+            places = resp.json().get("places", [])
+            if places:
                 lines = []
                 for i, p in enumerate(places, 1):
                     n = p.get("displayName", {}).get("text", "?")
@@ -3893,9 +3901,13 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if addr: line += f"\n   {addr}"
                     if mu: line += f"\n   📍 {mu}"
                     lines.append(line)
-                result = "\n\n".join(lines) if lines else "Ничего не найдено."
+                result = "\n\n".join(lines)
                 pm = "HTML" if "<b>" in result else None
                 await update.message.reply_text(result, parse_mode=pm, disable_web_page_preview=True)
+                return
+        q_enc = _up.quote(pending["query"])
+        maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
+        await update.message.reply_text(f"📍 Вот {pending['query']} рядом с тобой:\n{maps_url}", disable_web_page_preview=True)
     else:
         await update.message.reply_text("📍 Геолокация сохранена. Если захочешь найти что-то рядом — просто спроси.")
 
