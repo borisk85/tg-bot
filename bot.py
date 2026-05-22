@@ -4023,6 +4023,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _pending_attachments.pop(user_id, None)
                 image_data = {"media_type": pending["mime"], "data": _b64.b64encode(pending["bytes"]).decode()}
 
+        # Подхватить фото из _pending_photo если image_data всё ещё None
+        if image_data is None and user_id in _pending_photo:
+            image_data = _pending_photo.pop(user_id)
+
         async def send_photo(url: str):
             await update.message.reply_photo(photo=url)
 
