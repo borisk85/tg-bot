@@ -3907,19 +3907,19 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             places = places[:_limit]
             lines = []
             for i, p in enumerate(places, 1):
-                    n = p.get("displayName", {}).get("text", "?")
-                    r = p.get("rating"); rv = p.get("userRatingCount")
-                    addr = ", ".join(p.get("formattedAddress", "").split(",")[:2])
-                    mu = p.get("googleMapsUri", "")
-                    line = f"{i}. <b>{n}</b>"
-                    if r: line += f"\n   ⭐ {r}" + (f" ({rv} отзывов)" if rv else "")
-                    if addr: line += f"\n   {addr}"
-                    if mu: line += f"\n   📍 {mu}"
-                    lines.append(line)
-                result = "\n\n".join(lines)
-                pm = "HTML" if "<b>" in result else None
-                await update.message.reply_text(result, parse_mode=pm, disable_web_page_preview=True)
-                return
+                n = p.get("displayName", {}).get("text", "?")
+                r = p.get("rating"); rv = p.get("userRatingCount")
+                addr = ", ".join(p.get("formattedAddress", "").split(",")[:2])
+                mu = p.get("googleMapsUri", "")
+                line = f"{i}. <b>{n}</b>"
+                if r: line += f"\n   ⭐ {r}" + (f" ({rv} отзывов)" if rv else "")
+                if addr: line += f"\n   {addr}"
+                if mu: line += f"\n   📍 {mu}"
+                lines.append(line)
+            result = "\n\n".join(lines)
+            pm = "HTML" if "<b>" in result else None
+            await update.message.reply_text(result, parse_mode=pm, disable_web_page_preview=True)
+            return
         q_enc = _up.quote(pending["query"])
         maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
         await update.message.reply_text(f"📍 Вот {pending['query']} рядом с тобой:\n{maps_url}", disable_web_page_preview=True)
