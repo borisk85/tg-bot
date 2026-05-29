@@ -3932,7 +3932,8 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not places:
                 await update.message.reply_text(f"По запросу «{pending['query']}» ничего не найдено рядом.")
                 return
-            places = sorted(places, key=lambda p: (p.get("rating") or 0, p.get("userRatingCount") or 0), reverse=True)
+            if not pending.get("sort_by_distance"):
+                places = sorted(places, key=lambda p: (p.get("rating") or 0, p.get("userRatingCount") or 0), reverse=True)
             places = places[:min(3, _limit)]
             lines = []
             btn_parts = []
