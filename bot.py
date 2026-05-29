@@ -2632,9 +2632,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 return "Чтобы найти что-то рядом — мне нужно знать где ты находишься. Нажми 📎 внизу → «Геопозиция» → отправь, и я сразу покажу ближайшие."
 
             # Places API — для «рядом» (с координатами) и «лучшие/топ»
-            requested = tool_input.get("limit", 3)
-            limit = max(1, min(5, requested))
-            over_limit = requested > 5
+            limit = max(1, min(3, tool_input.get("limit", 3)))
 
             location = tool_input.get("location") if not sort_by_distance else None
             text_query = f"{query} {location}".strip() if location else query
@@ -2665,9 +2663,15 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 places = [p for p in places if any(w in p.get("displayName", {}).get("text", "").lower() for w in pn_lower)]
             if not places:
                 return f"По запросу «{text_query}» ничего не найдено рядом."
+
+            # Сортировка: «лучшие/топ» → по рейтингу; остальное (рядом) → как вернул API
+            q_lower_sort = query.lower()
+            if not sort_by_distance and any(w in q_lower_sort for w in ("лучш", "топ", "top", "best", "рейтинг")):
+                places = sorted(places, key=lambda p: (p.get("rating") or 0, p.get("userRatingCount") or 0), reverse=True)
             places = places[:limit]
 
             lines = []
+            btn_parts = []
             for i, p in enumerate(places, 1):
                 name_txt = p.get("displayName", {}).get("text", "Без названия")
                 rating = p.get("rating")
@@ -2683,14 +2687,16 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                         line += f" ({reviews} отзывов)"
                 if addr_short:
                     line += f"\n   {addr_short}"
-                if maps_url_p:
-                    line += f"\n   📍 {maps_url_p}"
                 lines.append(line)
+                if maps_url_p:
+                    label = f"📍 {name_txt}".replace(",", "").replace("|", "")
+                    label = label[:38].rstrip() + ".." if len(label) > 40 else label
+                    btn_parts.append(f"{label}|{maps_url_p}")
 
-            result = "\n\n".join(lines)
-            if over_limit:
-                result = f"Могу показать максимум топ-5. Вот лучшие:\n\n{result}"
-            return result
+            text = "\n\n".join(lines)
+            if btn_parts:
+                return f"URL_BUTTONS:{','.join(btn_parts)}\n{text}"
+            return text
         except Exception as e:
             return f"Ошибка при поиске мест: {e}"
 
@@ -2799,7 +2805,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _send_reply(reply: str, message):
-    """Отправляет ответ агента. Если FLIGHTS_BTN: — добавляет кнопку Aviasales."""
+    """Отправляет ответ агента. Обрабатывает FLIGHTS_BTN: и URL_BUTTONS:."""
     if reply.startswith("FLIGHTS_BTN:"):
         rest = reply[len("FLIGHTS_BTN:"):]
         first_nl = rest.find("\n")
@@ -2812,6 +2818,25 @@ async def _send_reply(reply: str, message):
                 parse_mode="HTML",
                 reply_markup=keyboard if i == 0 else None
             )
+    elif reply.startswith("URL_BUTTONS:"):
+        rest = reply[len("URL_BUTTONS:"):]
+        first_nl = rest.find("\n")
+        if first_nl != -1:
+            btns_str = rest[:first_nl].strip()
+            text_body = rest[first_nl + 1:].strip()
+        else:
+            btns_str = rest.strip()
+            text_body = "Результаты:"
+        keyboard_rows = []
+        for item in btns_str.split(","):
+            if "|" in item:
+                label, url = item.split("|", 1)
+                label = label.strip()[:40]
+                if url.strip().startswith("http"):
+                    keyboard_rows.append([InlineKeyboardButton(label, url=url.strip())])
+        keyboard = InlineKeyboardMarkup(keyboard_rows) if keyboard_rows else None
+        pm = "HTML" if "<b>" in text_body else None
+        await message.reply_text(text_body or "Результаты:", parse_mode=pm, reply_markup=keyboard, disable_web_page_preview=True)
     else:
         pm = "HTML" if "<b>" in reply and "</b>" in reply else None
         for i in range(0, len(reply), 4096):
@@ -3907,8 +3932,10 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not places:
                 await update.message.reply_text(f"По запросу «{pending['query']}» ничего не найдено рядом.")
                 return
-            places = places[:_limit]
+            places = sorted(places, key=lambda p: (p.get("rating") or 0, p.get("userRatingCount") or 0), reverse=True)
+            places = places[:min(3, _limit)]
             lines = []
+            btn_parts = []
             for i, p in enumerate(places, 1):
                 n = p.get("displayName", {}).get("text", "?")
                 r = p.get("rating"); rv = p.get("userRatingCount")
@@ -3917,11 +3944,14 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 line = f"{i}. <b>{n}</b>"
                 if r: line += f"\n   ⭐ {r}" + (f" ({rv} отзывов)" if rv else "")
                 if addr: line += f"\n   {addr}"
-                if mu: line += f"\n   📍 {mu}"
                 lines.append(line)
-            result = "\n\n".join(lines)
-            pm = "HTML" if "<b>" in result else None
-            await update.message.reply_text(result, parse_mode=pm, disable_web_page_preview=True)
+                if mu:
+                    lbl = f"📍 {n}".replace(",", "").replace("|", "")
+                    lbl = lbl[:38].rstrip() + ".." if len(lbl) > 40 else lbl
+                    btn_parts.append([InlineKeyboardButton(lbl, url=mu)])
+            text_out = "\n\n".join(lines)
+            keyboard = InlineKeyboardMarkup(btn_parts) if btn_parts else None
+            await update.message.reply_text(text_out, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
             return
         q_enc = _up.quote(pending["query"])
         maps_url = f"https://www.google.com/maps/search/{q_enc}/@{lat},{lon},15z"
