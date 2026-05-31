@@ -1879,7 +1879,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
         for i, a in enumerate(alerts, 1):
             direction_text = "вырастет до" if a["direction"] == "above" else "упадет до"
             lines.append(f"{i}. {a['ticker']} {direction_text} ${a['target_price']:,.2f}")
-        return "\n".join(lines)
+        return "\n\n".join(lines)
 
     if name == "alert_price_cancel":
         alerts = get_price_alerts(user_id)
