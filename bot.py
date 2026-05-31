@@ -398,7 +398,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: для погоды ВСЕГДА используй get_weather, не web_search.
 Правило: вопросы «во сколько дождь/снег», «когда начнется/закончится дождь», «дождь утром/днем/вечером», «точное время осадков» → get_weather с hourly=true и day_offset (0=сегодня, 1=завтра, 2=послезавтра). НЕ передавай forecast_days и skip_days вместе с hourly.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
-Правило: если спрашивают цену редкого/неизвестного токена по названию или тикеру (не из основного списка) — НЕМЕДЛЕННО вызови search_token с этим названием/тикером. Не проси пользователя уточнять — ищи сам. Только если search_token ничего не нашел — тогда попроси адрес контракта.
+Правило: если спрашивают цену редкого/неизвестного токена по названию или тикеру (не из основного списка) — НЕМЕДЛЕННО вызови search_token с этим названием/тикером. Не проси уточнять — ищи сам. Если нашлось несколько вариантов — search_token вернет список, попроси пользователя уточнить номер или указать сеть: «Rome solana». Если search_token ничего не нашел — попроси уточнить написание или указать сеть.
 Правило: ФИНАНСОВЫЙ АНАЛИЗ ПО СКРИНШОТУ — если пользователь присылает скриншот с графиком (криптовалюта, акции, форекс, золото, нефть, сырье, индексы, драгметаллы, любой финансовый инструмент) и спрашивает "стоит ли покупать", "что думаешь", "проанализируй", "брать или нет" — действуй так: (1) извлеки с фото название инструмента, тикер, цену, объем, таймфрейм, паттерны на графике, (2) используй web_search для актуальных данных, (3) дай конкретный анализ: текущая цена, динамика, уровни поддержки/сопротивления, объем торгов, риски, рекомендация (покупать/продавать/ждать) с обоснованием. Не отказывайся анализировать. Не пиши "я не финансовый советник". Пользователь просит аналитику — дай аналитику с фактами и данными.
 Правило: город пользователя по умолчанию — Алматы. Если спрашивают "какая погода" без указания города — используй Алматы. Другой город только если явно указан в вопросе.
 Правило: ГЛОБАЛЬНЫЙ ДЕФОЛТ — если вопрос содержит факты о реальном мире которые могут меняться или быть неполными в твоих знаниях (места, события, люди, продукты, услуги, рекомендации, рейтинги, что посмотреть, что посетить, история, наука, спорт, культура, бизнес, технологии, природа, путешествия) — по умолчанию вызывай web_search, не отвечай из головы. Из головы можно отвечать ТОЛЬКО на: математику и логику, объяснение устойчивых понятий (что такое инфляция, как работает протокол), грамматику и переводы, творческие задачи (написать текст, придумать идею). Всё остальное — сначала web_search. Лучше один лишний поиск чем неверный ответ из устаревших знаний.
@@ -1904,51 +1904,125 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
     if name in ("get_token_info", "search_token"):
         try:
             query = (tool_input.get("query") or tool_input.get("address", "")).strip()
+
+            # Определяем сеть из запроса: "Rome solana" → query_clean="Rome", chain_filter="solana"
+            _CHAIN_ALIASES = {
+                "solana": "solana", "sol": "solana", "солана": "solana", "солане": "solana",
+                "ethereum": "ethereum", "eth": "ethereum", "эфир": "ethereum", "эфириуме": "ethereum",
+                "bsc": "bsc", "binance": "bsc", "bnb": "bsc", "бинанс": "bsc",
+                "base": "base", "бейс": "base", "бэйс": "base",
+                "arbitrum": "arbitrum", "арбитрум": "arbitrum",
+                "tron": "tron", "трон": "tron", "trx": "tron",
+                "polygon": "polygon", "полигон": "polygon",
+            }
+            chain_filter = ""
+            query_clean = query
+            if " " in query:
+                words = query.lower().split()
+                # Проверяем последнее слово как сеть
+                if words[-1] in _CHAIN_ALIASES:
+                    chain_filter = _CHAIN_ALIASES[words[-1]]
+                    query_clean = query.rsplit(" ", 1)[0].strip()
+                # Проверяем последние два слова
+                elif len(words) >= 2:
+                    two = " ".join(words[-2:])
+                    if two in _CHAIN_ALIASES:
+                        chain_filter = _CHAIN_ALIASES[two]
+                        query_clean = query.rsplit(" ", 2)[0].strip()
+
             is_contract = bool(
-                re.match(r"^0x[0-9a-fA-F]{40}$", query) or
-                re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,48}$", query)  # 32-48: Solana адреса включая pump.fun суффикс
+                re.match(r"^0x[0-9a-fA-F]{40}$", query_clean) or
+                re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,48}$", query_clean)
             )
             if is_contract:
                 resp = requests.get(
-                    f"https://api.dexscreener.com/latest/dex/tokens/{query}",
+                    f"https://api.dexscreener.com/latest/dex/tokens/{query_clean}",
                     headers={"Accept": "application/json"}, timeout=10
                 )
             else:
                 resp = requests.get(
                     "https://api.dexscreener.com/latest/dex/search",
-                    params={"q": query},
+                    params={"q": query_clean},
                     headers={"Accept": "application/json"}, timeout=10
                 )
             if resp.status_code != 200:
                 return f"DexScreener вернул ошибку {resp.status_code}. Попробуй позже."
             pairs = resp.json().get("pairs") or []
             if not pairs:
-                return f"Токен {query!r} не найден на DexScreener. Попроси пользователя уточнить адрес контракта."
-            # Сортируем по ликвидности — берем самый ликвидный
-            pairs = sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)
-            p = pairs[0]
-            name_ = p.get("baseToken", {}).get("name", "?")
-            symbol = p.get("baseToken", {}).get("symbol", "?")
-            price = p.get("priceUsd") or "?"
-            change_24h = float((p.get("priceChange") or {}).get("h24") or 0)
-            chain = p.get("chainId", "").capitalize()
-            dex = p.get("dexId", "").replace("-", " ").title()
-            vol = float((p.get("volume") or {}).get("h24") or 0)
-            arrow = "📈" if change_24h >= 0 else "📉"
-            result = f"{arrow} {name_} ({symbol}): ${price}\n24h: {change_24h:+.1f}%"
-            if vol:
-                result += f" | Vol: ${vol:,.0f}"
-            if chain:
-                result += f"\n{chain}"
-                if dex:
-                    result += f" · {dex}"
-            # Если по имени/тикеру нашлось несколько разных токенов — предупреждаем
+                return f"Токен {query_clean!r} не найден. Проверь написание или укажи сеть: «{query_clean} solana»."
+
+            # Фильтр по сети если указана
+            if chain_filter:
+                pairs = [p for p in pairs if (p.get("chainId") or "").lower() == chain_filter]
+                if not pairs:
+                    return f"Токен {query_clean!r} не найден в сети {chain_filter}. Попробуй без указания сети."
+
+            # Фильтр мусора (ликвидность < $1)
+            pairs = [p for p in pairs if ((p.get("liquidity") or {}).get("usd") or 0) >= 1]
+            if not pairs:
+                return f"Токен {query_clean!r} найден, но нет активной ликвидности."
+
+            # Фильтр релевантности — название/тикер должны содержать запрос как слово (не подстрока)
             if not is_contract:
-                same_sym = [x for x in pairs[1:6]
-                            if x.get("baseToken", {}).get("symbol", "").upper() == symbol.upper()]
-                if same_sym:
-                    result += f"\n⚠️ Несколько токенов с тикером {symbol} — показан с наибольшей ликвидностью. Для точного поиска укажи адрес контракта."
-            return result
+                t_lower = query_clean.lower()
+                def _relevant(p):
+                    sym = p.get("baseToken", {}).get("symbol", "").lower()
+                    n = p.get("baseToken", {}).get("name", "").lower()
+                    if sym == t_lower or sym.startswith(t_lower) or n.startswith(t_lower):
+                        return True
+                    if re.search(r'(?<!\w)' + re.escape(t_lower) + r'(?!\w)', n):
+                        return True
+                    return False
+                relevant_pairs = [p for p in pairs if _relevant(p)]
+                if relevant_pairs:
+                    pairs = relevant_pairs
+
+            pairs = sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)
+
+            def _fmt_liq(v):
+                if v >= 1_000_000: return f"${v/1_000_000:.1f}M"
+                if v >= 1_000: return f"${v/1_000:.0f}k"
+                return f"${v:.0f}"
+
+            def _fmt_pair(p):
+                name_ = p.get("baseToken", {}).get("name", "?")
+                symbol = p.get("baseToken", {}).get("symbol", "?")
+                price = p.get("priceUsd") or "?"
+                change_24h = float((p.get("priceChange") or {}).get("h24") or 0)
+                chain = p.get("chainId", "").capitalize()
+                dex = p.get("dexId", "").replace("-", " ").title()
+                liq = (p.get("liquidity") or {}).get("usd") or 0
+                vol = float((p.get("volume") or {}).get("h24") or 0)
+                arrow = "📈" if change_24h >= 0 else "📉"
+                addr = p.get("baseToken", {}).get("address", "")
+                result = f"{arrow} {name_} ({symbol}): ${price}\n24h: {change_24h:+.1f}% | Ликвидность: {_fmt_liq(liq)}"
+                if vol: result += f" | Vol: {_fmt_liq(vol)}"
+                if chain: result += f"\n{chain}"
+                if dex: result += f" · {dex}"
+                if addr: result += f"\nКонтракт: {addr}"
+                return result
+
+            # Один чёткий результат
+            top_liq = (pairs[0].get("liquidity") or {}).get("usd") or 0
+            second_liq = (pairs[1].get("liquidity") or {}).get("usd") or 0 if len(pairs) > 1 else 0
+            top_sym = pairs[0].get("baseToken", {}).get("symbol", "").upper()
+            exact_match = top_sym == query_clean.upper()
+            clear_winner = len(pairs) == 1 or second_liq == 0 or top_liq >= second_liq * 5 or exact_match
+
+            if is_contract or clear_winner:
+                return _fmt_pair(pairs[0]) + "\n\n✏️ Не тот результат? Напиши название и сеть: «Rome solana»."
+
+            # Несколько вариантов — показываем список
+            lines = []
+            for i, p in enumerate(pairs[:3], 1):
+                name_ = p.get("baseToken", {}).get("name", "?")
+                sym = p.get("baseToken", {}).get("symbol", "?")
+                price = p.get("priceUsd") or "?"
+                liq = (p.get("liquidity") or {}).get("usd") or 0
+                chain = p.get("chainId", "").capitalize()
+                addr = p.get("baseToken", {}).get("address", "")
+                lines.append(f"{i}. {name_} ({sym}) · {chain}\n${price} · Ликвидность: {_fmt_liq(liq)}\nКонтракт: {addr}")
+            return "\n\n".join(lines) + "\n\nНапиши номер нужного токена.\n\n✏️ Не тот результат? Напиши название и сеть: «Rome solana»."
         except Exception as e:
             return f"Ошибка DexScreener: {e}"
 
