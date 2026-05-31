@@ -4258,11 +4258,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if upload_to_drive:
             await _upload_to_drive(bytes(file_bytes), fname, mime, update, context)
             return
+        # Whitelist поддерживаемых форматов
+        _SUPPORTED_DOC_MIMES = {
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # DOCX
+            "application/msword",  # DOC
+            "text/plain",  # TXT
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # XLSX
+            "application/vnd.ms-excel",  # XLS
+        }
+        if not mime.startswith("image/") and mime not in _SUPPORTED_DOC_MIMES:
+            await update.message.reply_text("😔 Этот формат не поддерживается. Отправь фото (JPG, PNG и др.), PDF, DOCX, DOC, TXT или XLSX.")
+            return
+
         # Сохраняем файл в буфер — может понадобиться как вложение к письму
         _pending_attachments[user_id] = {"bytes": bytes(file_bytes), "filename": fname, "mime": mime}
-        if not user_text and not mime.startswith("image/") and mime not in ("text/plain", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"):
-            await update.message.reply_text(f"📎 Файл сохранен: {fname}")
+        if not user_text and not mime.startswith("image/") and mime not in _SUPPORTED_DOC_MIMES:
+            await update.message.reply_text(f"📎 Файл получен: {fname}. Что сделать?\n— Отправить на email\n— Загрузить в Drive\n— Проанализировать")
             return
+        if not user_text and not mime.startswith("image/"):
+            # Читаемый формат без подписи — автоанализ
+            pass
         if mime.startswith("image/"):
             import base64
             image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
