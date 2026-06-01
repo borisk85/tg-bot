@@ -3804,6 +3804,36 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("История очищена.")
 
 @authorized
+async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    reminders = get_reminders(user_id)
+    active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
+    if not active:
+        await update.message.reply_text("Активных напоминаний нет.")
+        return
+    user_tz = get_user_tz(user_id)
+    now = datetime.now(user_tz)
+    once = [(i, r) for i, r in active if not r.get("repeat")]
+    recurring = [(i, r) for i, r in active if r.get("repeat")]
+    parts = []
+    counter = 1
+    if recurring:
+        lines = ["🔁 Повторяющиеся:"]
+        for _, r in recurring:
+            dt = datetime.fromisoformat(r["at"]).astimezone(user_tz)
+            lines.append(f"{counter}. {r['text']} — {_format_when_human(dt, now)} 🔁")
+            counter += 1
+        parts.append("\n".join(lines))
+    if once:
+        lines = ["⏰ Разовые:"]
+        for _, r in once:
+            dt = datetime.fromisoformat(r["at"]).astimezone(user_tz)
+            lines.append(f"{counter}. {r['text']} — {_format_when_human(dt, now)}")
+            counter += 1
+        parts.append("\n".join(lines))
+    await update.message.reply_text("\n\n".join(parts))
+
+@authorized
 async def cmd_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = " ".join(context.args) if context.args else ""
@@ -4398,6 +4428,7 @@ def main():
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
+    app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
@@ -4412,6 +4443,7 @@ def main():
             BotCommand("timezone", "Часовой пояс"),
             BotCommand("memory", "Что бот знает обо мне"),
             BotCommand("about", "Рассказать о себе"),
+            BotCommand("reminders", "Активные напоминания"),
         ])
     app.post_init = post_init
 
