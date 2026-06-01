@@ -4136,7 +4136,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_data = _pending_photo.pop(user_id)
 
         async def send_photo(url: str):
-            await update.message.reply_photo(photo=url)
+            img_bytes = await asyncio.to_thread(lambda: requests.get(url, timeout=30).content)
+            await update.message.reply_photo(photo=img_bytes)
 
         transcript_with_context = f"🎤 {transcript}"
         reply_to = update.message.reply_to_message
