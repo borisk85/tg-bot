@@ -3869,6 +3869,13 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
 
 @authorized
+async def cmd_clearmemory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if redis_client:
+        redis_client.delete(f"memory:{user_id}")
+    await update.message.reply_text("Память очищена.")
+
+@authorized
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
@@ -4428,6 +4435,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("clearmemory", cmd_clearmemory))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
