@@ -788,12 +788,13 @@ TOOLS = [
     },
     {
         "name": "reminder_set",
-        "description": "Устанавливает напоминание. Бот напишет пользователю в указанное время. Используй когда просят напомнить через N минут/часов или в конкретное время/дату.",
+        "description": "Устанавливает напоминание. Бот напишет пользователю в указанное время. Используй когда просят напомнить через N минут/часов или в конкретное время/дату. Для повторяющихся передавай repeat: 'daily' (каждый день), 'weekly' (каждую неделю), 'weekly_mon'..'weekly_sun' (по дню недели), 'every_Nh' (каждые N часов, N>=1), 'every_Nd' (каждые N дней, N>=1). Для разовых repeat не передавай.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Текст напоминания"},
-                "datetime": {"type": "string", "description": "Когда напомнить — ISO формат YYYY-MM-DDTHH:MM или относительно: '+30m', '+2h', '+1d'"}
+                "datetime": {"type": "string", "description": "Когда напомнить — ISO формат YYYY-MM-DDTHH:MM или относительно: '+30m', '+2h', '+1d'"},
+                "repeat": {"type": "string", "description": "Периодичность: daily, weekly, weekly_mon..weekly_sun, every_Nh, every_Nd. Только для повторяющихся."}
             },
             "required": ["text", "datetime"]
         }
@@ -1656,10 +1657,29 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             else:
                 remind_at = user_tz.localize(datetime.fromisoformat(dt_str))
 
+            repeat = tool_input.get("repeat") or None
+            entry = {"text": text, "at": remind_at.isoformat(), "done": False}
+            if repeat:
+                entry["repeat"] = repeat
             reminders = get_reminders(user_id)
-            reminders.append({"text": text, "at": remind_at.isoformat(), "done": False})
+            reminders.append(entry)
             save_reminders(user_id, reminders)
-            return f"Напоминание установлено на {remind_at.strftime('%d.%m.%Y %H:%M')}: {text}"
+            _wd = {"mon":"пн","tue":"вт","wed":"ср","thu":"чт","fri":"пт","sat":"сб","sun":"вс"}
+            if not repeat:
+                repeat_suffix = ""
+            elif repeat == "daily":
+                repeat_suffix = " (каждый день)"
+            elif repeat == "weekly":
+                repeat_suffix = " (каждую неделю)"
+            elif repeat.startswith("weekly_"):
+                repeat_suffix = f" (по {_wd.get(repeat[7:], repeat[7:])})"
+            elif repeat.startswith("every_") and repeat.endswith("h"):
+                repeat_suffix = f" (каждые {max(1, int(repeat[6:-1]))} ч)"
+            elif repeat.startswith("every_") and repeat.endswith("d"):
+                repeat_suffix = f" (каждые {max(1, int(repeat[6:-1]))} дн.)"
+            else:
+                repeat_suffix = ""
+            return f"Напоминание установлено на {remind_at.strftime('%d.%m.%Y %H:%M')}: {text}{repeat_suffix}"
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -1674,7 +1694,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             lines = []
             for idx, (_, r) in enumerate(active, 1):
                 dt = datetime.fromisoformat(r["at"]).astimezone(user_tz)
-                lines.append(f"{idx}. {r['text']} — {_format_when_human(dt, now)}")
+                repeat_mark = " 🔁" if r.get("repeat") else ""
+                lines.append(f"{idx}. {r['text']} — {_format_when_human(dt, now)}{repeat_mark}")
             return "\n".join(lines)
         except Exception as e:
             return f"Ошибка: {e}"
@@ -3692,12 +3713,32 @@ async def check_reminders(context):
         changed = False
         for r in reminders:
             if not r.get("done") and TZ.localize(datetime.fromisoformat(r["at"]).replace(tzinfo=None)) <= now:
-                r["done"] = True
                 changed = True
                 try:
                     await send_voice_reminder(context.bot, user_id, r["text"])
                 except Exception as e:
                     logger.error(f"Ошибка отправки напоминания: {e}")
+                repeat = r.get("repeat")
+                if repeat:
+                    from datetime import timedelta as _td
+                    trigger_dt = datetime.fromisoformat(r["at"])
+                    if repeat == "daily":
+                        r["at"] = (trigger_dt + _td(days=1)).isoformat()
+                    elif repeat == "weekly":
+                        r["at"] = (trigger_dt + _td(weeks=1)).isoformat()
+                    elif repeat.startswith("every_") and repeat.endswith("h"):
+                        r["at"] = (trigger_dt + _td(hours=max(1, int(repeat[6:-1])))).isoformat()
+                    elif repeat.startswith("every_") and repeat.endswith("d"):
+                        r["at"] = (trigger_dt + _td(days=max(1, int(repeat[6:-1])))).isoformat()
+                    elif repeat.startswith("weekly_"):
+                        _wd = {"mon":0,"tue":1,"wed":2,"thu":3,"fri":4,"sat":5,"sun":6}
+                        wd = _wd.get(repeat[7:], 0)
+                        days_ahead = (wd - trigger_dt.weekday()) % 7 or 7
+                        r["at"] = (trigger_dt + _td(days=days_ahead)).isoformat()
+                    else:
+                        r["done"] = True
+                else:
+                    r["done"] = True
         if changed:
             save_reminders(user_id, reminders)
 
