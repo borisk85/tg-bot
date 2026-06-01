@@ -1537,7 +1537,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             images = result.get("images", [])
             if not images:
                 return "Не удалось сгенерировать изображение."
-            return f"IMAGE_URL:{images[0]['url']}"
+            tip = "\n\n💡 Совет: модель лучше всего справляется с пейзажами, природой и абстракцией. Текст, логотипы и шрифты — не ее сильная сторона."
+            return f"IMAGE_URL:{images[0]['url']}{tip}"
         except Exception as e:
             return f"Ошибка генерации: {e}"
 
@@ -2872,8 +2873,10 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
                     result = await execute_tool(block.name, block.input, user_id)
                     logger.info(f"tool_result: {block.name} → {result[:200]}")
                     if result.startswith("IMAGE_URL:") and send_photo:
-                        url = result[len("IMAGE_URL:"):]
-                        await send_photo(url)
+                        rest = result[len("IMAGE_URL:"):]
+                        url = rest.split("\n")[0].strip()
+                        tip = rest[len(url):].strip()
+                        await send_photo(url, tip or None)
                         result = "Изображение сгенерировано и отправлено."
                     last_tool_result = result
                     tool_results.append({
@@ -4011,10 +4014,10 @@ async def _process_media_group(group_id: str, context):
     image_data = {"media_type": "image/jpeg", "data": base64.b64encode(photos[0]).decode()}
     user_text = caption
 
-    async def send_photo(url: str):
-        await update.message.reply_photo(photo=url)
+    async def send_photo(url: str, tip=None):
+        img_bytes = await asyncio.to_thread(lambda: requests.get(url, timeout=30).content)
+        await update.message.reply_photo(photo=img_bytes, caption=tip)
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         reply = await asyncio.wait_for(
             run_agent(user_id, user_text, image_data, send_photo=send_photo),
@@ -4206,9 +4209,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if image_data is None and user_id in _pending_photo:
             image_data = _pending_photo.pop(user_id)
 
-        async def send_photo(url: str):
+        async def send_photo(url: str, tip=None):
             img_bytes = await asyncio.to_thread(lambda: requests.get(url, timeout=30).content)
-            await update.message.reply_photo(photo=img_bytes)
+            await update.message.reply_photo(photo=img_bytes, caption=tip)
 
         transcript_with_context = f"🎤 {transcript}"
         reply_to = update.message.reply_to_message
@@ -4384,8 +4387,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-    async def send_photo(url: str):
-        await update.message.reply_photo(photo=url)
+    async def send_photo(url: str, tip=None):
+        img_bytes = await asyncio.to_thread(lambda: requests.get(url, timeout=30).content)
+        await update.message.reply_photo(photo=img_bytes, caption=tip)
 
     try:
         reply = await asyncio.wait_for(
