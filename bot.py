@@ -3757,7 +3757,7 @@ def authorized(func):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text(
-        "Привет! Вот что я умею:\n\n"
+        "Привет! Вот, что я умею:\n\n"
         "📅 Google Calendar\n"
         "— создать, посмотреть, удалить события\n\n"
         "📋 Google Tasks\n"
@@ -3783,19 +3783,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✈️ Поиск авиабилетов\n"
         "— цены на рейсы в нужные даты по всему миру\n\n"
         "🗺 Путеводитель\n"
-        "— рестораны, спа, парки, аптеки рядом или в любом городе\n\n"
+        "— любые места по всему миру с рейтингом\n\n"
         "🧠 Долгосрочная память\n"
-        "— запоминаю факты из бесед между сессиями\n\n"
+        "— запомню важные факты о тебе\n\n"
         "🌅 Утренний дайджест\n"
-        "— погода, события, курсы активов и задачи на день\n\n"
+        "— погода, курсы активов, напоминания и задачи на день\n\n"
         "📰 Конкурентный радар\n"
-        "— обзор рынка конкурентов раз в неделю\n\n"
+        "— обзор рынка конкурентов в заданное время\n\n"
         "📄 Документы\n"
-        "— PDF, Word, текстовые файлы\n\n"
+        "— анализировать файлы и отвечать на вопросы по содержимому\n\n"
         "📊 Акции, индексы, драгметаллы и сырье\n"
-        "— цены сейчас на все виды активов\n\n"
+        "— актуальные цены на все виды активов\n\n"
         "🔍 Поиск в интернете\n"
-        "— актуальная информация в интернете\n\n"
+        "— актуальная информация из сети\n\n"
         "🎨 Генерация изображений\n"
         "— создание изображений по описанию"
     )
@@ -3867,13 +3867,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @authorized
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Твой user ID: {update.effective_user.id}")
-
-@authorized
-async def cmd_clearmemory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if redis_client:
-        redis_client.delete(f"memory:{user_id}")
-    await update.message.reply_text("Память очищена.")
 
 @authorized
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4435,7 +4428,6 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
-    app.add_handler(CommandHandler("clearmemory", cmd_clearmemory))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
