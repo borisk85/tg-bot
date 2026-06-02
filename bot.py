@@ -1616,12 +1616,21 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             if mime == "application/vnd.google-apps.document":
                 content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
-                return content.decode("utf-8")[:4000]
+                text = content.decode("utf-8")
+                truncated = len(text) > 4000
+                return text[:4000] + ("\n\n⚠ Документ слишком большой — показаны первые 4000 символов." if truncated else "")
+            elif mime == "application/vnd.google-apps.spreadsheet":
+                content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+                text = content.decode("utf-8")
+                truncated = len(text) > 4000
+                return text[:4000] + ("\n\n⚠ Таблица большая — показаны первые 4000 символов для анализа." if truncated else "")
             elif mime == "text/plain":
                 content = service.files().get_media(fileId=file_id).execute()
-                return content.decode("utf-8")[:4000]
+                text = content.decode("utf-8")
+                truncated = len(text) > 4000
+                return text[:4000] + ("\n\n⚠ Файл слишком большой — показаны первые 4000 символов." if truncated else "")
             else:
-                return f"Файл '{meta['name']}' нельзя прочитать как текст (тип: {mime})"
+                return "😔 Этот файл с Google Drive проанализировать не могу — работаю только с Google Docs и Google Sheets которые уже там. Отправь другой формат файла прямо в чат, и я помогу."
         except Exception as e:
             return f"Ошибка: {e}"
 
@@ -4256,7 +4265,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Загрузка файла в Drive если caption содержит "в drive" / "в драйв"
     caption_lower = (update.message.caption or "").lower()
-    upload_to_drive = any(w in caption_lower for w in ["в drive", "в драйв", "сохрани в drive", "загрузи в drive"])
+    upload_to_drive = any(w in caption_lower for w in ["в drive", "в драйв", "на drive", "на драйв", "сохрани в drive", "загрузи в drive", "загрузи на drive", "загрузи на драйв", "загрузи"])
 
     if update.message.photo:
         import base64, io
