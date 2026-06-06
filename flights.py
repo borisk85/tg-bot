@@ -317,6 +317,13 @@ class FlightsModule:
         v1_direct_dates = {f["departure_at"][:10] for f in v1_flights if f.get("transfers", 0) == 0}
         v1_has_direct = any(f.get("transfers", 0) == 0 for f in v1_flights) if v1_flights else True
 
+        if v1_has_direct and v1_flights:
+            _v1_dir_min = min((f["duration"] for f in v1_flights if f.get("transfers", 0) == 0 and f.get("duration", 0) > 0), default=0)
+            _v1_con_min = min((f["duration"] for f in v1_flights if f.get("transfers", 0) > 0 and f.get("duration", 0) > 0), default=0)
+            if _v1_dir_min and _v1_con_min and _v1_dir_min >= _v1_con_min * 1.2:
+                v1_has_direct = False
+                typical_direct_duration = 0
+
         flights = []
         if calendar_flights:
             for flight in calendar_flights:
@@ -348,10 +355,58 @@ class FlightsModule:
                 for f in flights:
                     if f.get("transfers", 0) > 0 and f.get("duration", 0) <= typical_direct_duration:
                         f["duration"] = 0
+
+            for f in flights:
+                if f.get("transfers", 0) == 0 and f.get("duration", 0) > 840:
+                    f["transfers"] = 1
+
+            _marker = os.getenv("TRAVELPAYOUTS_MARKER", "")
+            valid_flights = [f for f in flights if not f.get("duration") or f["duration"] <= 840]
+            if valid_flights:
+                flights = valid_flights
+            elif flights:
+                try:
+                    _, _m = month.split("-")
+                    _ld = f"01{_m}"
+                except Exception:
+                    _ld = ""
+                _link = f"https://www.aviasales.com/search/{origin_iata}{_ld}{dest_iata}1"
+                if _marker:
+                    _link += f"?marker={_marker}"
+                try:
+                    _months_ru = ["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"]
+                    _, _mi = month.split("-")
+                    _ms = f"{_months_ru[int(_mi)-1]} {month[:4]}"
+                except Exception:
+                    _ms = month
+                return (f"FLIGHTS_BTN:{_link}\n✈️ {origin_iata} → {dest_iata}, {_ms}\n\nАктуальных данных по этому маршруту в нашей базе нет.\nСмотри варианты напрямую на Aviasales — там точно найдешь.")
+
         elif v2_flights:
             flights = v2_flights
         elif v1_flights:
             flights = v1_flights
+
+        if flights and not calendar_flights:
+            _marker2 = os.getenv("TRAVELPAYOUTS_MARKER", "")
+            valid_fb = [f for f in flights if not f.get("duration") or f["duration"] <= 840]
+            if valid_fb:
+                flights = valid_fb
+            elif flights:
+                try:
+                    _, _m2 = month.split("-")
+                    _ld2 = f"01{_m2}"
+                except Exception:
+                    _ld2 = ""
+                _link2 = f"https://www.aviasales.com/search/{origin_iata}{_ld2}{dest_iata}1"
+                if _marker2:
+                    _link2 += f"?marker={_marker2}"
+                try:
+                    _months_ru2 = ["январе","феврале","марте","апреле","мае","июне","июле","августе","сентябре","октябре","ноябре","декабре"]
+                    _, _mi2 = month.split("-")
+                    _ms2 = f"{_months_ru2[int(_mi2)-1]} {month[:4]}"
+                except Exception:
+                    _ms2 = month
+                return (f"FLIGHTS_BTN:{_link2}\n✈️ {origin_iata} → {dest_iata}, {_ms2}\n\nАктуальных данных по этому маршруту в нашей базе нет.\nСмотри варианты напрямую на Aviasales — там точно найдешь.")
 
         if not flights:
             return f"Рейсов {origin_iata} → {dest_iata} в {month} не найдено.\nПопробуй другой месяц или соседние аэропорты."
