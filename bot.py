@@ -4420,30 +4420,20 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.inline_query.answer([], cache_time=0)
         return
 
-    inline_system = (
-        "Ты — личный ИИ-агент. Отвечаешь кратко и по делу. "
-        "Только plain text, без markdown: запрещены **, __, *, _, `, #, ~. "
-        "Мужской род о себе. Никаких слов 'алерт', 'крипта'. "
-        "Если вопрос требует актуальных данных (погода, курсы, рейсы) — честно скажи что в инлайн-режиме инструменты недоступны. "
-        f"Текущая дата: {now_local().strftime('%Y-%m-%d %H:%M')}."
-    )
+    user_id = update.inline_query.from_user.id
 
     import uuid
+
+    async def _noop_send_photo(url: str, tip=None):
+        pass
+
     try:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                lambda: anthropic.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=512,
-                    system=inline_system,
-                    messages=[{"role": "user", "content": query}],
-                )
-            ),
-            timeout=8.0,
+        answer_text = await asyncio.wait_for(
+            run_agent(user_id, query, send_photo=_noop_send_photo),
+            timeout=9.0,
         )
-        answer_text = resp.content[0].text.strip()
     except asyncio.TimeoutError:
-        answer_text = "Запрос занял слишком долго. Попробуй короче."
+        answer_text = "Запрос занял слишком долго. Попробуй еще раз."
     except Exception as e:
         logger.error(f"Inline query error: {e}")
         answer_text = "Ошибка. Попробуй еще раз."
