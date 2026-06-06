@@ -379,7 +379,7 @@ class FlightsModule:
                     _ms = f"{_months_ru[int(_mi)-1]} {month[:4]}"
                 except Exception:
                     _ms = month
-                return (f"FLIGHTS_BTN:{_link}\n✈️ {origin_iata} → {dest_iata}, {_ms}\n\nАктуальных данных по этому маршруту в нашей базе нет.\nСмотри варианты напрямую на Aviasales — там точно найдешь.")
+                return f"✈️ {origin_iata} → {dest_iata}, {_ms}\n\nПо этому маршруту актуальных данных нет.\nПопробуй другой месяц или поищи на Aviasales напрямую."
 
         elif v2_flights:
             flights = v2_flights
@@ -406,7 +406,7 @@ class FlightsModule:
                     _ms2 = f"{_months_ru2[int(_mi2)-1]} {month[:4]}"
                 except Exception:
                     _ms2 = month
-                return (f"FLIGHTS_BTN:{_link2}\n✈️ {origin_iata} → {dest_iata}, {_ms2}\n\nАктуальных данных по этому маршруту в нашей базе нет.\nСмотри варианты напрямую на Aviasales — там точно найдешь.")
+                return f"✈️ {origin_iata} → {dest_iata}, {_ms2}\n\nПо этому маршруту актуальных данных нет.\nПопробуй другой месяц или поищи на Aviasales напрямую."
 
         if not flights:
             return f"Рейсов {origin_iata} → {dest_iata} в {month} не найдено.\nПопробуй другой месяц или соседние аэропорты."
