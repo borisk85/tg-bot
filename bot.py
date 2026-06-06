@@ -11,7 +11,8 @@ def now_local():
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram import InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import Application, MessageHandler, CommandHandler, InlineQueryHandler, filters, ContextTypes
 
 import re
 import threading
@@ -4413,6 +4414,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Произошла ошибка. Попробуй еще раз.")
 
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query.query.strip()
+    if not query:
+        await update.inline_query.answer([], cache_time=0)
+        return
+
+    inline_system = (
+        "Ты — личный ИИ-агент. Отвечаешь кратко и по делу. "
+        "Только plain text, без markdown: запрещены **, __, *, _, `, #, ~. "
+        "Мужской род о себе. Никаких слов 'алерт', 'крипта'. "
+        "Если вопрос требует актуальных данных (погода, курсы, рейсы) — честно скажи что в инлайн-режиме инструменты недоступны. "
+        f"Текущая дата: {now_local().strftime('%Y-%m-%d %H:%M')}."
+    )
+
+    import uuid
+    try:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: anthropic.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=512,
+                    system=inline_system,
+                    messages=[{"role": "user", "content": query}],
+                )
+            ),
+            timeout=8.0,
+        )
+        answer_text = resp.content[0].text.strip()
+    except asyncio.TimeoutError:
+        answer_text = "Запрос занял слишком долго. Попробуй короче."
+    except Exception as e:
+        logger.error(f"Inline query error: {e}")
+        answer_text = "Ошибка. Попробуй еще раз."
+
+    if len(answer_text) > 4096:
+        answer_text = answer_text[:4093] + "..."
+
+    results = [
+        InlineQueryResultArticle(
+            id=str(uuid.uuid4()),
+            title=query[:50] + ("..." if len(query) > 50 else ""),
+            description=answer_text[:100],
+            input_message_content=InputTextMessageContent(message_text=answer_text),
+        )
+    ]
+    await update.inline_query.answer(results, cache_time=0)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -4438,6 +4487,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
