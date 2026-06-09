@@ -4626,6 +4626,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
 
+    # В группах — отвечать только на @mention или reply на сообщение бота
+    chat_type = update.message.chat.type
+    if chat_type in ("group", "supergroup"):
+        bot_un = (context.bot.username or "").lower()
+        entities = update.message.entities or []
+        mention_ents = [
+            e for e in entities
+            if e.type == "mention" and
+            user_text[e.offset:e.offset + e.length].lower().lstrip("@") == bot_un
+        ] if bot_un else []
+        mentioned = bool(mention_ents)
+        reply_msg = update.message.reply_to_message
+        is_reply_to_bot = bool(
+            reply_msg and reply_msg.from_user and reply_msg.from_user.is_bot and
+            (not bot_un or (reply_msg.from_user.username or "").lower() == bot_un)
+        )
+        if not mentioned and not is_reply_to_bot:
+            return
+        # Reply на бота, но текст адресован другому @пользователю — не отвечать
+        if is_reply_to_bot and not mentioned:
+            other = [e for e in entities if e.type == "mention" and
+                     user_text[e.offset:e.offset + e.length].lower().lstrip("@") != bot_un]
+            if other:
+                return
+        # Убираем @botname из текста
+        if mention_ents:
+            new_text = user_text
+            for e in sorted(mention_ents, key=lambda x: x.offset, reverse=True):
+                new_text = (new_text[:e.offset] + new_text[e.offset + e.length:]).strip()
+            user_text = new_text
+
     # TTL для pending_attachments: если буфер старше 5 минут — чистим, чтобы старые фото не подтягивались
     import time as _time
     if user_id in _pending_attachments_ts:
