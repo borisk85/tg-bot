@@ -1155,6 +1155,107 @@ TOOLS = [
             },
             "required": ["origin", "destination", "month"]
         }
+    },
+    {
+        "name": "notion_search",
+        "description": "Поиск страниц и баз данных в Notion. Вызывай при любом запросе 'найди в Notion', 'поищи в ноушен', 'покажи что есть в Notion'. С пустым query — показывает все доступные страницы.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Поисковый запрос (можно пустой — тогда вернет все)"},
+                "filter_type": {"type": "string", "enum": ["page", "database"], "description": "Фильтр: page или database. Опционально."}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "notion_get_page",
+        "description": "Прочитать содержимое страницы Notion по ID. НИКОГДА не говори 'открой в Notion' — всегда читай через этот инструмент.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string", "description": "ID страницы из notion_search"}
+            },
+            "required": ["page_id"]
+        }
+    },
+    {
+        "name": "notion_create_page",
+        "description": "Создать новую страницу в Notion. parent_id — ID родительской страницы или базы данных.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "string", "description": "ID родительской страницы или БД"},
+                "title": {"type": "string", "description": "Название страницы"},
+                "content": {"type": "string", "description": "Текст содержимого (параграфы через пустую строку). Опционально."}
+            },
+            "required": ["parent_id", "title"]
+        }
+    },
+    {
+        "name": "notion_update_page",
+        "description": "Добавить текст в конец страницы Notion.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string", "description": "ID страницы из notion_search или notion_get_page"},
+                "content": {"type": "string", "description": "Текст для добавления"}
+            },
+            "required": ["page_id", "content"]
+        }
+    },
+    {
+        "name": "notion_create_entry",
+        "description": "Создать запись в базе данных Notion.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "database_id": {"type": "string", "description": "ID базы данных из notion_search"},
+                "title": {"type": "string", "description": "Название записи"}
+            },
+            "required": ["database_id", "title"]
+        }
+    },
+    {
+        "name": "notion_archive",
+        "description": "Архивировать (удалить) страницу или запись в Notion.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string", "description": "ID страницы из notion_search"}
+            },
+            "required": ["page_id"]
+        }
+    },
+    {
+        "name": "tg_list_channels",
+        "description": "Показать список Telegram-каналов на которые подписан пользователь. Вызывай при запросе 'покажи мои каналы', 'какие каналы'.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "tg_read_channel",
+        "description": "Прочитать посты из Telegram-канала за N дней и резюмировать. days=0 — только последний пост. Вызывай при 'о чем пишут в @канал', 'что нового в канале за неделю'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Username или название канала (например @channelname или 'Ведомости')"},
+                "days": {"type": "integer", "description": "За сколько дней (0 = только последний пост, максимум 30)", "minimum": 0, "maximum": 30}
+            },
+            "required": ["channel", "days"]
+        }
+    },
+    {
+        "name": "gmail_save_draft",
+        "description": "Сохранить письмо как черновик в Gmail без отправки. Используй когда говорят 'подготовь черновик', 'сохрани как черновик', 'я сам отправлю'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Email получателя"},
+                "subject": {"type": "string", "description": "Тема письма"},
+                "body": {"type": "string", "description": "Текст письма"}
+            },
+            "required": ["to", "subject", "body"]
+        }
     }
 ]
 
@@ -2805,6 +2906,280 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return text
         except Exception as e:
             return f"Ошибка при поиске мест: {e}"
+
+    # ── Notion ────────────────────────────────────────────────────────────────
+
+    if name in ("notion_search", "notion_get_page", "notion_create_page",
+                "notion_update_page", "notion_create_entry", "notion_archive"):
+        import httpx as _httpx
+        notion_token = os.getenv("NOTION_TOKEN", "")
+        if not notion_token:
+            return "NOTION_TOKEN не настроен в переменных окружения."
+        _notion_headers = {
+            "Authorization": f"Bearer {notion_token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        }
+        _NOTION_API = "https://api.notion.com/v1"
+
+        def _rt(rt): return "".join(x.get("plain_text", "") for x in rt)
+
+        if name == "notion_search":
+            async def _do():
+                payload = {"query": tool_input.get("query", ""), "page_size": 10}
+                ft = tool_input.get("filter_type")
+                if ft in ("page", "database"):
+                    payload["filter"] = {"value": ft, "property": "object"}
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(f"{_NOTION_API}/search", headers=_notion_headers, json=payload)
+                    r.raise_for_status()
+                results = r.json().get("results", [])
+                if not results:
+                    return "Ничего не найдено."
+                lines = []
+                for item in results:
+                    otype = item.get("object")
+                    iid = item.get("id", "").replace("-", "")
+                    if otype == "page":
+                        props = item.get("properties", {})
+                        tp = props.get("title") or props.get("Name") or props.get("Название")
+                        title = _rt(tp.get("title", []) or tp.get("rich_text", [])) if tp else "Без названия"
+                        lines.append(f"📄 {title} [page_id:{iid}]")
+                    elif otype == "database":
+                        title = _rt(item.get("title", []))
+                        lines.append(f"🗃 {title or 'База данных'} [database_id:{iid}]")
+                return "\n".join(lines)
+            return await _do()
+
+        if name == "notion_get_page":
+            async def _do():
+                pid = tool_input["page_id"].replace("-", "")
+                async with _httpx.AsyncClient(timeout=30) as c:
+                    rp = await c.get(f"{_NOTION_API}/pages/{pid}", headers=_notion_headers)
+                    rp.raise_for_status()
+                    page = rp.json()
+                    all_blocks = []
+                    cursor = None
+                    while True:
+                        url = f"{_NOTION_API}/blocks/{pid}/children?page_size=100"
+                        if cursor:
+                            url += f"&start_cursor={cursor}"
+                        rb = await c.get(url, headers=_notion_headers)
+                        rb.raise_for_status()
+                        bd = rb.json()
+                        all_blocks.extend(bd.get("results", []))
+                        if not bd.get("has_more"):
+                            break
+                        cursor = bd.get("next_cursor")
+                        if len(all_blocks) >= 200:
+                            break
+
+                def _bstr(b):
+                    bt = b.get("type", "")
+                    d = b.get(bt, {})
+                    text = _rt(d.get("rich_text", []))
+                    if bt in ("heading_1","heading_2","heading_3"):
+                        return f"{'#'*int(bt[-1])} {text}"
+                    if bt == "bulleted_list_item": return f"• {text}"
+                    if bt == "numbered_list_item": return f"1. {text}"
+                    if bt == "to_do": return f"[{'x' if d.get('checked') else ' '}] {text}"
+                    if bt == "child_page": return f"📄 {d.get('title','Страница')} [page_id:{b.get('id','').replace('-','')}]"
+                    if bt == "child_database": return f"🗃 {d.get('title','БД')} [database_id:{b.get('id','').replace('-','')}]"
+                    return text
+
+                props = page.get("properties", {})
+                tp = props.get("title") or props.get("Name") or props.get("Название")
+                title = _rt(tp.get("title", []) or tp.get("rich_text", [])) if tp else "Без названия"
+                lines = [f"# {title}", ""]
+                for b in all_blocks:
+                    s = _bstr(b)
+                    if s:
+                        lines.append(s)
+                return "\n".join(lines) if len(lines) > 2 else "Страница пуста."
+            return await _do()
+
+        if name == "notion_create_page":
+            async def _do():
+                pid = tool_input["parent_id"].replace("-", "")
+                title = tool_input["title"]
+                content = tool_input.get("content", "")
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    rcheck = await c.get(f"{_NOTION_API}/pages/{pid}", headers=_notion_headers)
+                    parent_type = "page_id" if rcheck.status_code == 200 else "database_id"
+                children = []
+                for para in content.split("\n\n"):
+                    p = para.strip()
+                    if p:
+                        children.append({"object":"block","type":"paragraph","paragraph":{"rich_text":[{"type":"text","text":{"content":p}}]}})
+                payload = {
+                    "parent": {parent_type: pid},
+                    "properties": {"title": {"title": [{"type":"text","text":{"content":title}}]}}
+                }
+                if children:
+                    payload["children"] = children[:100]
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(f"{_NOTION_API}/pages", headers=_notion_headers, json=payload)
+                    r.raise_for_status()
+                    page = r.json()
+                return f"✅ Страница создана: {title}\n{page.get('url','')}"
+            return await _do()
+
+        if name == "notion_update_page":
+            async def _do():
+                pid = tool_input["page_id"].replace("-", "")
+                content = tool_input["content"]
+                children = []
+                for para in content.split("\n\n"):
+                    p = para.strip()
+                    if p:
+                        children.append({"object":"block","type":"paragraph","paragraph":{"rich_text":[{"type":"text","text":{"content":p}}]}})
+                if not children:
+                    return "Нечего добавлять."
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    r = await c.patch(f"{_NOTION_API}/blocks/{pid}/children", headers=_notion_headers, json={"children":children[:100]})
+                    r.raise_for_status()
+                return "✅ Текст добавлен на страницу."
+            return await _do()
+
+        if name == "notion_create_entry":
+            async def _do():
+                db_id = tool_input["database_id"].replace("-", "")
+                title = tool_input["title"]
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    rdb = await c.get(f"{_NOTION_API}/databases/{db_id}", headers=_notion_headers)
+                    rdb.raise_for_status()
+                    db_props = rdb.json().get("properties", {})
+                title_key = next((k for k,v in db_props.items() if v.get("type")=="title"), "Name")
+                payload = {
+                    "parent": {"database_id": db_id},
+                    "properties": {title_key: {"title": [{"type":"text","text":{"content":title}}]}}
+                }
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(f"{_NOTION_API}/pages", headers=_notion_headers, json=payload)
+                    r.raise_for_status()
+                    page = r.json()
+                return f"✅ Запись добавлена: {title}\n{page.get('url','')}"
+            return await _do()
+
+        if name == "notion_archive":
+            async def _do():
+                pid = tool_input["page_id"].replace("-", "")
+                async with _httpx.AsyncClient(timeout=15) as c:
+                    r = await c.patch(f"{_NOTION_API}/pages/{pid}", headers=_notion_headers, json={"archived": True})
+                    r.raise_for_status()
+                return "✅ Страница перемещена в архив."
+            return await _do()
+
+    # ── Telegram каналы ───────────────────────────────────────────────────────
+
+    if name == "tg_list_channels":
+        async def _tg_list():
+            from telethon import TelegramClient
+            from telethon.sessions import StringSession
+            from telethon.tl.types import Channel
+            api_id = os.getenv("TELEGRAM_API_ID")
+            api_hash = os.getenv("TELEGRAM_API_HASH")
+            session_str = os.getenv("TELETHON_SESSION", "")
+            if not api_id or not api_hash:
+                return "TELEGRAM_API_ID или TELEGRAM_API_HASH не настроены."
+            client = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+            try:
+                await client.connect()
+                if not await client.is_user_authorized():
+                    return "Telethon-сессия не авторизована — обнови TELETHON_SESSION."
+                channels = []
+                async for dialog in client.iter_dialogs():
+                    if isinstance(dialog.entity, Channel) and dialog.entity.broadcast:
+                        uname = f"@{dialog.entity.username}" if dialog.entity.username else ""
+                        channels.append(f"• {dialog.name}{' ' + uname if uname else ''}")
+                    if len(channels) >= 20:
+                        break
+                if not channels:
+                    return "Подписки на каналы не найдены."
+                return "Твои Telegram-каналы:\n" + "\n".join(channels)
+            finally:
+                await client.disconnect()
+        return _run_async_in_thread(_tg_list())
+
+    if name == "tg_read_channel":
+        async def _tg_read():
+            from telethon import TelegramClient
+            from telethon.sessions import StringSession
+            from telethon.tl.types import Channel
+            from datetime import datetime, timezone, timedelta
+            api_id = os.getenv("TELEGRAM_API_ID")
+            api_hash = os.getenv("TELEGRAM_API_HASH")
+            session_str = os.getenv("TELETHON_SESSION", "")
+            if not api_id or not api_hash:
+                return "TELEGRAM_API_ID или TELEGRAM_API_HASH не настроены."
+            channel_query = tool_input["channel"].lstrip("@").lower()
+            days = min(int(tool_input.get("days", 7)), 30)
+            client = TelegramClient(StringSession(session_str), int(api_id), api_hash)
+            try:
+                await client.connect()
+                if not await client.is_user_authorized():
+                    return "Telethon-сессия не авторизована — обнови TELETHON_SESSION."
+                target_entity = None
+                target_title = tool_input["channel"]
+                async for dialog in client.iter_dialogs():
+                    if not (isinstance(dialog.entity, Channel) and dialog.entity.broadcast):
+                        continue
+                    uname = (dialog.entity.username or "").lower()
+                    title = (dialog.name or "").lower()
+                    if channel_query == uname or channel_query in title or title in channel_query:
+                        target_entity = dialog.entity
+                        target_title = dialog.name
+                        break
+                if target_entity is None:
+                    return f"Канал «{tool_input['channel']}» не найден среди подписок."
+                posts = []
+                total_chars = 0
+                if days == 0:
+                    async for msg in client.iter_messages(target_entity, limit=50):
+                        if msg.text or msg.caption:
+                            text = (msg.text or msg.caption)[:2000]
+                            date = msg.date.strftime("%d.%m %H:%M") if msg.date else ""
+                            posts.append(f"[{date}] {text}")
+                            break
+                else:
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+                    async for msg in client.iter_messages(target_entity, reverse=False):
+                        if msg.date and msg.date < cutoff:
+                            break
+                        if not (msg.text or msg.caption):
+                            continue
+                        text = (msg.text or msg.caption)[:1000]
+                        date = msg.date.strftime("%d.%m %H:%M") if msg.date else ""
+                        entry = f"[{date}] {text}"
+                        total_chars += len(entry)
+                        if total_chars > 50000:
+                            posts.append("[...посты обрезаны по объему]")
+                            break
+                        posts.append(entry)
+                if not posts:
+                    label = "последний пост" if days == 0 else f"посты за {days} дн."
+                    return f"Нет текстовых постов в «{target_title}» ({label})."
+                period_label = "Последний пост" if days == 0 else f"Посты за {days} дн."
+                return f"{period_label} — {target_title}:\n\n" + "\n\n---\n\n".join(posts)
+            finally:
+                await client.disconnect()
+        return _run_async_in_thread(_tg_read())
+
+    # ── Gmail: сохранить черновик ─────────────────────────────────────────────
+
+    if name == "gmail_save_draft":
+        try:
+            import base64
+            from email.mime.text import MIMEText
+            service = get_gmail_service()
+            msg = MIMEText(tool_input["body"], "plain", "utf-8")
+            msg["to"] = tool_input["to"]
+            msg["subject"] = tool_input["subject"]
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+            service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+            return f"✅ Черновик сохранен: {tool_input['subject']} → {tool_input['to']}"
+        except Exception as e:
+            return f"Ошибка: {e}"
 
     return f"[Инструмент '{name}' не найден]"
 
