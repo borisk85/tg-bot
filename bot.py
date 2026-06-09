@@ -4152,6 +4152,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "— поиск, чтение, отправка, удаление, корзина, спам, отписка\n\n"
         "🗂 Google Drive\n"
         "— поиск, чтение, создание документов, таблиц, папок\n\n"
+        "📝 Notion\n"
+        "— поиск, чтение, создание страниц и записей в базах данных\n\n"
         "⏰ Напоминания\n"
         "— напомнить о чем-либо в нужное время\n\n"
         "🔔 Ценовые уведомления\n"
@@ -4162,6 +4164,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "— сейчас и прогноз до 5 дней\n\n"
         "📖 Чтение сайтов\n"
         "— открыть ссылку и пересказать содержимое\n\n"
+        "📡 Telegram-каналы\n"
+        "— читать посты из каналов за любой период и резюмировать\n\n"
         "📸 Анализ фото\n"
         "— описать и ответить на вопросы по фото\n\n"
         "🍽 Анализ калорий по фото\n"
@@ -4790,6 +4794,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Произошла ошибка. Попробуй еще раз.")
 
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.inline_query.from_user.id not in ALLOWED_USERS:
+        await update.inline_query.answer([], cache_time=0)
+        return
+
     query = update.inline_query.query.strip()
     if not query:
         await update.inline_query.answer([], cache_time=0)
