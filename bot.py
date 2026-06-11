@@ -397,7 +397,8 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: для курсов валют и крипты ВСЕГДА используй get_crypto_prices, не web_search. BTC, ETH, SOL, BNB, XRP, DOGE и другие основные монеты по тикеру — ТОЛЬКО get_crypto_prices. search_token (DexScreener) — для редких/неизвестных токенов: принимает название, тикер или адрес контракта (строка 32-48 символов, может заканчиваться на "pump"). НИКОГДА не жди все адреса сразу — получил один адрес, сразу вызывай search_token. НИКОГДА не уточняй "чей это адрес" — инструмент сам вернет название токена. НИКОГДА не используй search_token для BTC/ETH/SOL/BNB/XRP/DOGE и других монет из get_crypto_prices.
 Правило: для акций, биржевых индексов (NASDAQ, S&P500, Dow Jones), драгметаллов (золото, серебро) и сырья (нефть) ВСЕГДА используй get_market_price, не web_search. Тикеры: золото=GC=F, серебро=SI=F, нефть=CL=F, NASDAQ=^IXIC, S&P500=^GSPC, Dow Jones=^DJI.
 Правило: ЦЕНОВЫЕ УВЕДОМЛЕНИЯ — когда пользователь говорит "уведоми когда", "напомни когда X достигнет", "предупреди если цена упадет/вырастет до" — НЕМЕДЛЕННО вызови alert_price_set без уточняющих вопросов. Маппинг названий в тикеры: биткоин/btc→BTC, эфир/eth→ETH, солана/sol→SOL, дог/doge→DOGE, золото→GC=F, серебро→SI=F, нефть→CL=F, насдак→^IXIC, s&p500→^GSPC. direction: если цель выше текущей — "above", ниже — "below". Подтверди: "Готово 🔔 Напишу, как только [тикер] [вырастет до / упадет до] $[цена]".
-Правило: для погоды ВСЕГДА используй get_weather, не web_search.
+Правило: для погоды ВСЕГДА используй get_weather, не web_search. Исключение — общие климат-вопросы без конкретного прогноза («какая обычно погода в Дананге в июне», «какой климат в Турции»): на них отвечай из собственных знаний, без инструмента. Если просят прогноз больше чем на 5 дней — передавай запрошенное число как есть: инструмент сам ограничит пятью днями и сообщит о лимите; после этого своими словами предложи рассказать, какая погода обычно бывает в этом месте в этом месяце.
+Правило: не заканчивай ответ встречным вопросом ради поддержания беседы («Едешь?», «Интересно?», «Рассказать еще?»). Пользователь получил ответ — точка. Вопрос в конце допустим только когда без него нельзя продолжить: нужно уточнение или выбор пользователя.
 Правило: вопросы «во сколько дождь/снег», «когда начнется/закончится дождь», «дождь утром/днем/вечером», «точное время осадков» → get_weather с hourly=true и day_offset (0=сегодня, 1=завтра, 2=послезавтра). НЕ передавай forecast_days и skip_days вместе с hourly.
 Правило: формат ответа на запрос цены/курса — только строка с эмодзи + название + цена + изменение за 24ч. Без лишних полей, без комментариев, без объяснений. Пример: "📈 BTC: $85,000 (+2.3%)" или "📉 XAU/USD: $4,510 (-0.5%)". Не добавляй контекст, выводы, советы.
 Правило: если спрашивают цену редкого/неизвестного токена по названию или тикеру (не из основного списка) — НЕМЕДЛЕННО вызови search_token с этим названием/тикером. Не проси уточнять — ищи сам. Если нашлось несколько вариантов — search_token вернет список, попроси пользователя уточнить номер или указать сеть: «Rome solana». Если search_token ничего не нашел — попроси уточнить написание или указать сеть.
@@ -2319,6 +2320,25 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 params=base_params, timeout=10
             )
             if resp.status_code == 404:
+                # Геокодинг-фолбэк: понимает свободные написания («Дананг, Вьетнам»)
+                for cand in dict.fromkeys([city, city.split(",")[0].strip()]):
+                    if not cand:
+                        continue
+                    geo = requests.get(
+                        "https://api.openweathermap.org/geo/1.0/direct",
+                        params={"q": cand, "limit": 1, "appid": api_key}, timeout=10
+                    )
+                    if geo.status_code == 200 and geo.json():
+                        g = geo.json()[0]
+                        base_params.pop("q", None)
+                        base_params["lat"] = g["lat"]
+                        base_params["lon"] = g["lon"]
+                        resp = requests.get(
+                            "https://api.openweathermap.org/data/2.5/weather",
+                            params=base_params, timeout=10
+                        )
+                        break
+            if resp.status_code == 404:
                 return f"Город «{city}» не найден."
             if resp.status_code != 200:
                 return "Ошибка получения погоды."
@@ -2382,6 +2402,9 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
 
             if forecast_days and forecast_days > 0:
                 # Прогноз — показываем ТОЛЬКО прогноз без текущей погоды
+                forecast_limit_exceeded = forecast_days > 5
+                if forecast_limit_exceeded:
+                    forecast_days = 5
                 resp2 = requests.get(
                     "https://api.openweathermap.org/data/2.5/forecast",
                     params={**base_params, "cnt": 40}, timeout=10
@@ -2412,6 +2435,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                     icon2 = _weather_icon(info["desc"])
                     forecast_lines.append(f"{d}: {icon2} {t_min:.0f}–{t_max:.0f}°C, {info['desc']}")
                 if forecast_lines:
+                    if forecast_limit_exceeded:
+                        return "📅 Извини, прогноз доступен максимум на 5 дней вперед — показываю ближайшие дни:\n\n" + "\n".join(forecast_lines)
                     return f"Прогноз для {city_name}:\n\n" + "\n".join(forecast_lines)
                 return f"Не удалось получить прогноз для {city_name}."
 
