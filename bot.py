@@ -479,8 +479,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 /clear — очистить историю
 /myid — Telegram ID
 /ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram (СНГ + мир/EN) прямо сейчас (каждый пн в 12:00 приходит автоматически)
-/mailkit_digest — запустить дайджест по конкурентам MailKit на EN-рынке прямо сейчас (каждый пн в 12:05 приходит автоматически)
-/career_digest — запустить дайджест по конкурентам Career Navigator на EN-рынке прямо сейчас (каждый пн в 12:10 приходит автоматически)"""
+/mailkit_digest — запустить дайджест по конкурентам MailKit на EN-рынке прямо сейчас (каждый пн в 12:05 приходит автоматически)"""
 
 # ── Weather helpers ───────────────────────────────────────────────────────────
 
@@ -3827,7 +3826,7 @@ async def send_weekly_mailkit_digest(context):
         product_profile = """ПРОДУКТ — MailKit (getmailkit.com):
 SaaS, автоматизирующий настройку корпоративной почты на своем домене в существующем Gmail-аккаунте. Юзер получает hello@yourdomain.com за $5 разово, не теряя привычный Gmail.
 
-МЕХАНИКА: Cloudflare Email Routing + AWS SES Tenant Management + Gmail Send-As wizard. Требует Cloudflare DNS (это ограничение аудитории). Один платеж — юзер владеет стеком навсегда, без зависимости от MailKit.
+МЕХАНИКА: Cloudflare Email Routing + Postmark SMTP + Gmail Send-As wizard. Требует Cloudflare DNS (это ограничение аудитории). Один платеж — юзер владеет стеком навсегда, без зависимости от MailKit.
 
 РЫНОК: B2C, EN-рынок. ICP — indie hackers, solopreneurs, freelancers с 3-10 проектами. Gmail = основной ящик, переезжать на Workspace не хотят. Ценят время > $50/час.
 
@@ -4918,13 +4917,12 @@ def main():
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
     app.job_queue.run_daily(send_weekly_mailkit_digest, time=dt.time(hour=12, minute=5, tzinfo=TZ), days=(1,))  # пн 12:05, через 5 мин после VELA
-    app.job_queue.run_daily(send_weekly_career_navigator_digest, time=dt.time(hour=12, minute=10, tzinfo=TZ), days=(1,))  # пн 12:10
+    # app.job_queue.run_daily(send_weekly_career_navigator_digest, time=dt.time(hour=12, minute=10, tzinfo=TZ), days=(1,))  # пн 12:10 — ОТКЛЮЧЕН 2026-06-16: проект на паузе
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
     app.add_handler(CommandHandler("mailkit_digest", cmd_mailkit_digest))
-    app.add_handler(CommandHandler("career_digest", cmd_career_navigator_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
