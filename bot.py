@@ -4921,6 +4921,9 @@ X_RADAR_QUERIES = [
     '"solopreneur" min_faves:10',
     '"Claude Code" min_faves:10',
     '"AI startup" min_faves:15',
+    # 2-й раунд прогона: AI SaaS 14/19, AI builder 13/18. Отброшены shipping 7/11, bootstrapped 3/4, wrapper 4/6 (мало/средне).
+    '"AI SaaS" min_faves:10',
+    '"AI builder" min_faves:5',
 ]
 # крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
 X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
