@@ -4903,6 +4903,96 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.inline_query.answer(results, cache_time=0)
 
 
+# ── X-радар: горячие посты по моим темам для реплаев ──────────────────────────
+X_RADAR_QUERIES = [
+    '"AI assistant" telegram',
+    '"telegram bot" AI',
+    '"vibe coding"',
+    '"build in public" AI',
+    '"AI agent"',
+    '"personal AI"',
+    '"indie hacker"',
+]
+# крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
+X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
+                 "altcoin", "nft", "token", "bullish", "bearish", "casino", "betting")
+
+
+async def cmd_xradar(update, context):
+    """X-радар: ищет свежие горячие посты по моим темам, отдает топ со ссылками для реплаев."""
+    await update.message.reply_text("🔭 Сканирую X по твоим темам, 20-40 сек...")
+    api_key = os.getenv("TWITTERAPI_KEY")
+    if not api_key:
+        await update.message.reply_text("Не задан TWITTERAPI_KEY в .env.")
+        return
+    import time as _t
+    since = int(_t.time()) - 2 * 86400  # последние 2 дня
+    seen, posts = set(), []
+    for q in X_RADAR_QUERIES:
+        query = f'{q} lang:en min_faves:10 since_time:{since}'
+        try:
+            resp = requests.get(
+                "https://api.twitterapi.io/twitter/tweet/advanced_search",
+                headers={"X-API-Key": api_key},
+                params={"query": query, "queryType": "Top"},
+                timeout=25,
+            )
+            tweets = resp.json().get("tweets", []) or []
+        except Exception as e:
+            logger.warning(f"xradar query failed [{q}]: {e}")
+            continue
+        for tw in tweets:
+            tid = tw.get("id")
+            if not tid or tid in seen:
+                continue
+            if tw.get("isReply"):  # хотим исходные посты, не чужие ответы
+                continue
+            low = (tw.get("text") or "").lower()
+            if any(b in low for b in X_RADAR_BLOCK):  # крипто/спам отсекаем
+                continue
+            seen.add(tid)
+            posts.append(tw)
+    if not posts:
+        await update.message.reply_text(
+            "🔭 По твоим темам за 2 дня горячего без спама не нашлось. Загляни позже."
+        )
+        return
+
+    def _eng(tw):
+        return (tw.get("likeCount", 0) or 0) + (tw.get("retweetCount", 0) or 0) * 2 + (tw.get("replyCount", 0) or 0)
+
+    posts.sort(key=_eng, reverse=True)
+    top = posts[:15]
+    header = (
+        f"🔭 X-радар — {len(top)} горячих постов по твоим темам за 2 дня.\n"
+        f"Тапни ссылку → ответь прямо в X.\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    blocks = [header]
+    for i, tw in enumerate(top, 1):
+        a = tw.get("author") or {}
+        name = a.get("name") or a.get("userName") or "—"
+        uname = a.get("userName") or ""
+        foll = a.get("followers", 0) or 0
+        foll_s = f"{foll // 1000}k" if foll >= 1000 else str(foll)
+        likes = tw.get("likeCount", 0) or 0
+        rts = tw.get("retweetCount", 0) or 0
+        reps = tw.get("replyCount", 0) or 0
+        url = tw.get("url") or tw.get("twitterUrl") or ""
+        txt = " ".join((tw.get("text") or "").split())
+        if len(txt) > 220:
+            txt = txt[:217] + "..."
+        blocks.append(
+            f"\n{i}. 👤 {name} (@{uname}) · {foll_s} подписчиков\n"
+            f"💬 {txt}\n"
+            f"♥ {likes}   🔁 {rts}   💬 {reps}\n"
+            f"➡️ {url}"
+        )
+    full = "\n".join(blocks)
+    for i in range(0, len(full), 4096):
+        await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -4927,6 +5017,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("xradar", cmd_xradar))
     app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
@@ -4943,6 +5034,7 @@ def main():
             BotCommand("memory", "Что бот знает обо мне"),
             BotCommand("about", "Рассказать о себе"),
             BotCommand("reminders", "Активные напоминания"),
+            BotCommand("xradar", "Горячие посты X по моим темам"),
         ])
     app.post_init = post_init
 
