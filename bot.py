@@ -4928,6 +4928,40 @@ X_RADAR_QUERIES = [
 # крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
 X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
                  "altcoin", "nft", "token", "bullish", "bearish", "casino", "betting")
+# явные приманки/фоллоу-трейны/giveaway — отсекаем по фразе (семантику ловит классификатор ниже)
+X_RADAR_BAIT = (
+    "let's connect", "lets connect", "let's grow together", "lets grow together", "grow together",
+    "drop a link", "drop your link", "drop what you're building", "drop what you are building",
+    "follow everyone", "i'll follow", "ill follow", "follow back", "followback", "must follow",
+    "comment below", "reply with your", "tag a friend", "tag someone", "rt if", "like if you",
+    "retweet if", "repost if", "giveaway", "who's building", "whos building",
+)
+
+
+def _xradar_worthy(text: str) -> bool:
+    """Haiku-классификатор: годен ли пост под содержательный реплай (True) или это мусор (False)."""
+    t = (text or "").strip()
+    if len(t) < 25:  # слишком короткий тизер/флекс — почти всегда мусор
+        return False
+    try:
+        resp = anthropic.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            system=(
+                "You filter X/Twitter posts for a solo founder who replies with genuine value to grow his account. "
+                "Answer with ONE word: yes or no.\n"
+                "yes = the post states a claim, opinion, insight, question, or real experience that a founder can add a substantive on-topic reply to.\n"
+                "no = engagement-bait or low-value: follow-train / 'let's connect' / 'drop your link', a listicle or tool/resource dump, "
+                "a giveaway, a pure flex / aesthetic / teaser with no real point, an ad or product promo, a testimonial praising another product, "
+                "a portfolio or work showcase, or a celebrity/mainstream post whose audience is not builders/founders."
+            ),
+            messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
+        )
+        ans = "".join(b.text for b in resp.content if hasattr(b, "text")).strip().lower()
+        return ans.startswith("y")
+    except Exception as e:
+        logger.warning(f"xradar classify failed: {e}")
+        return True  # при сбое классификатора не теряем пост
 
 
 async def cmd_xradar(update, context):
@@ -4962,6 +4996,8 @@ async def cmd_xradar(update, context):
             low = (tw.get("text") or "").lower()
             if any(b in low for b in X_RADAR_BLOCK):  # крипто/спам отсекаем
                 continue
+            if any(b in low for b in X_RADAR_BAIT):  # приманки/фоллоу-трейны/giveaway
+                continue
             seen.add(tid)
             posts.append(tw)
     if not posts:
@@ -4974,9 +5010,20 @@ async def cmd_xradar(update, context):
         return (tw.get("likeCount", 0) or 0) + (tw.get("retweetCount", 0) or 0) * 2 + (tw.get("replyCount", 0) or 0)
 
     posts.sort(key=_eng, reverse=True)
-    top = posts[:15]
+    # фильтр качества: топ-40 по engagement прогоняем через классификатор, оставляем только пригодные под реплай
+    candidates = posts[:40]
+    await update.message.reply_text(
+        f"🔭 Нашёл {len(posts)} постов, отсеиваю мусор (приманки, реклама, листиклы, флекс)..."
+    )
+    worthy = [tw for tw in candidates if _xradar_worthy(tw.get("text") or "")]
+    if not worthy:
+        await update.message.reply_text(
+            "🔭 Горячее по темам есть, но всё мусор — приманки, реклама, листиклы. Под реплай ничего годного, загляни позже."
+        )
+        return
+    top = worthy[:15]
     header = (
-        f"🔭 X-радар — {len(top)} горячих постов по твоим темам за 2 дня.\n"
+        f"🔭 X-радар — {len(top)} постов ПОД РЕПЛАЙ (из {len(posts)} сырых, мусор отфильтрован).\n"
         f"Тапни ссылку → ответь прямо в X.\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
