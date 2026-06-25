@@ -4998,6 +4998,12 @@ async def cmd_xradar(update, context):
                 continue
             if any(b in low for b in X_RADAR_BAIT):  # приманки/фоллоу-трейны/giveaway
                 continue
+            if redis_client:  # дедуп между прогонами: уже показанные посты не повторяем
+                try:
+                    if redis_client.exists(f"xradar:shown:{tid}"):
+                        continue
+                except Exception:
+                    pass
             seen.add(tid)
             posts.append(tw)
     if not posts:
@@ -5022,6 +5028,12 @@ async def cmd_xradar(update, context):
         )
         return
     top = worthy[:15]
+    if redis_client:  # запоминаем показанные на 14 дней, чтобы следующий прогон их не повторял
+        for tw in top:
+            try:
+                redis_client.set(f"xradar:shown:{tw.get('id')}", "1", ex=1209600)
+            except Exception:
+                pass
     header = (
         f"🔭 X-радар — {len(top)} постов ПОД РЕПЛАЙ (из {len(posts)} сырых, мусор отфильтрован).\n"
         f"Тапни ссылку → ответь прямо в X.\n"
