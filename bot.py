@@ -4905,13 +4905,16 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # ── X-радар: горячие посты по моим темам для реплаев ──────────────────────────
 X_RADAR_QUERIES = [
-    '"AI assistant" telegram',
-    '"telegram bot" AI',
-    '"vibe coding"',
-    '"build in public" AI',
-    '"AI agent"',
-    '"personal AI"',
-    '"indie hacker"',
+    # Отобрано по РЕАЛЬНОМУ прогону через API (clean/total за 2 дня, 25.06):
+    # personal AI 17/18, build in public 17/20, vibe coding 17/20, no code AI 11/20,
+    # AI agent telegram 10/19, indie hacker 6/6. Выброшены: "telegram bot AI" (1/7 мусор),
+    # "shipped my" (3/5 мало), "AI assistant in telegram" (редкий).
+    '"personal AI" min_faves:10',
+    '"build in public" min_faves:20',
+    '"vibe coding" min_faves:10',
+    '"no code" "AI" min_faves:10',
+    '"AI agent" telegram min_faves:5',
+    '"indie hacker" min_faves:10',
 ]
 # крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
 X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
@@ -4929,7 +4932,7 @@ async def cmd_xradar(update, context):
     since = int(_t.time()) - 2 * 86400  # последние 2 дня
     seen, posts = set(), []
     for q in X_RADAR_QUERIES:
-        query = f'{q} lang:en min_faves:10 since_time:{since}'
+        query = f'{q} lang:en since_time:{since}'  # min_faves уже внутри каждого запроса
         try:
             resp = requests.get(
                 "https://api.twitterapi.io/twitter/tweet/advanced_search",
