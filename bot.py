@@ -4915,6 +4915,12 @@ X_RADAR_QUERIES = [
     '"no code" "AI" min_faves:10',
     '"AI agent" telegram min_faves:5',
     '"indie hacker" min_faves:10',
+    # добавлено по прогону через API (clean/total): solo founder 18/20, solopreneur 16/19,
+    # Claude Code 11/20, AI startup 11/20. micro saas (2/3) и telegram bot AI (1/7) — отброшены.
+    '"solo founder" min_faves:10',
+    '"solopreneur" min_faves:10',
+    '"Claude Code" min_faves:10',
+    '"AI startup" min_faves:15',
 ]
 # крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
 X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
