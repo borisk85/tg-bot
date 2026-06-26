@@ -5462,10 +5462,10 @@ def _target_words(thread):
     близко к этому: даже развёрнутая дискуссия редко требует больше 2 предложений."""
     n = len((thread or "").split())
     if n < 40:        # короткий вопрос / простая боль → 1 предложение
-        return 22
+        return 25
     if n < 150:       # средний тред → 1-2 предложения
-        return 32
-    return 42         # развёрнутый/технический → 2 предложения, не больше
+        return 45
+    return 75         # длинный дискуссионный пост → 2-3 предложения с аргументом+примером (как другие в треде)
 
 
 def _enforce_short(text, max_words=70):
@@ -5540,11 +5540,11 @@ async def _rc_generate(update, pain, image_data=None):
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
                 "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
                 "REDDIT BEST PRACTICES (from research):\n"
-                "- LENGTH (data-based): real reddit comments are SHORT — median ~14 words, average ~25, and 91% are under "
-                "100 words; shorter comments get more upvotes. So keep it to 1-2 sentences, about 15-35 words. A simple "
-                "question → one sentence is enough. Even a deep discussion thread rarely needs more than 2 sentences plus "
-                "maybe a short third. NEVER an essay or multiple paragraphs (that screams AI). Not a bare throwaway line "
-                "either — say one concrete, specific thing. Always ONE single block of text, no blank line.\n"
+                "- LENGTH: scale depth to the POST. A short or simple post → 1 sentence, ~15-25 words. BUT if the post is a "
+                "long, thoughtful discussion (the author wrote several sentences building an argument), a bare one-liner "
+                "looks shallow next to the other replies — give 2-3 sentences with ONE concrete point plus a brief specific "
+                "reason or example, roughly 45-75 words. Still NEVER an essay, multiple paragraphs, or padding. Match the "
+                "post: short post → short reply, deep post → a bit more substance (but tight). Always ONE single block, no blank line.\n"
                 "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
@@ -5570,13 +5570,15 @@ async def _rc_generate(update, pain, image_data=None):
                 "- No emojis, no hashtags.\n"
                 "- A question back is fine SOMETIMES, but do NOT end every comment with one — a question in every reply is "
                 "itself an AI tell. Often just state your take and stop. Vary it; most comments need no question at all.\n"
-                "PROMOTION (Reddit's real current rule: be a genuine participant, not a promoter. "
-                "The old rigid 9:1 ratio was officially retired — mods judge overall behavior, not a percentage):\n"
-                "- DEFAULT is NO product. Genuinely help. The vast majority of replies must have zero product mention.\n"
-                "- Mention VELA ONLY when it's a genuine organic fit — the person clearly wants exactly what it does (an AI "
-                "assistant inside Telegram, no API key, with memory). Then once, as your own experience, plainly disclosing "
-                "it's yours (e.g. 'a telegram bot i made, velabot.io'). Never salesy.\n"
-                "- When in doubt, do NOT mention it.\n"
+                "PROMOTION (be a genuine participant, not a promoter. The old rigid 9:1 ratio was retired — mods judge "
+                "overall behavior):\n"
+                "- On most threads: NO product, just genuinely help.\n"
+                "- BUT when the fit is CLEAR — the person describes wanting exactly what VELA is (an AI assistant that lives "
+                "where they already work / inside Telegram, with persistent long-term memory, no API key, no new app) — you "
+                "SHOULD mention it once, naturally, as your own experience, plainly saying it's yours ('a telegram bot i "
+                "made, velabot.io'). On a clear fit do NOT stay silent — that wastes the whole point. Keep it casual, one "
+                "mention, never salesy, no second pitch.\n"
+                "- Silence is the default ONLY for non-fits and borderline cases, NOT for an obvious fit like the above.\n"
                 + BORIS_PROFILE +
                 "\nFACT CHECK: if your reply states any concrete fact — a price, a free/paid status, a usage limit, a model "
                 "name or version, a date, a specific feature — you MUST use web_search to verify it is current and true "
@@ -5641,11 +5643,12 @@ async def _xr_generate(update, post, image_data=None):
                 "- Casual. Light slang ok (tbh, imo, ngl, gonna).\n"
                 "- No hashtags. Emojis only if truly natural, otherwise none.\n"
                 "PROMOTION (be a genuine participant, not a promoter — authentic value first, X penalizes spammy self-promo):\n"
-                "- DEFAULT is NO product. Just a genuine reply. The vast majority of replies must have zero product mention.\n"
-                "- Mention VELA ONLY when it's a genuine organic fit — they clearly want exactly what it does (an AI assistant "
-                "inside Telegram, no API key, with memory). Then once, as your own experience, plainly disclosing it's yours "
-                "('a telegram bot i made, velabot.io'). Never salesy.\n"
-                "- When in doubt, do NOT mention it.\n"
+                "- On most posts: NO product, just a genuine reply.\n"
+                "- BUT when the fit is CLEAR — they describe wanting exactly what VELA is (an AI assistant that lives where "
+                "they already work / inside Telegram, with persistent memory, no API key) — you SHOULD mention it once, "
+                "naturally, as your own experience, plainly saying it's yours ('a telegram bot i made, velabot.io'). On a "
+                "clear fit do NOT stay silent. Keep it casual, one mention, never salesy.\n"
+                "- Silence is the default ONLY for non-fits and borderline cases, NOT for an obvious fit.\n"
                 + BORIS_PROFILE +
                 "\nFACT CHECK: if your reply states any concrete fact — a price, a free/paid status, a usage limit, a model "
                 "name or version, a date, a specific feature — you MUST use web_search to verify it is current and true "
