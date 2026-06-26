@@ -5140,12 +5140,19 @@ def _reddit_worthy(title, body):
             model="claude-haiku-4-5-20251001",
             max_tokens=5,
             system=(
-                "You filter Reddit posts for someone who replies with genuine value in threads about AI assistants, "
-                "bots, automation, productivity. Answer ONE word: yes or no.\n"
-                "yes = the author states a real problem, frustration, question, or is looking for a solution/recommendation "
-                "that a knowledgeable person can give a substantive, helpful reply to.\n"
-                "no = self-promotion ('I built/launched X'), a release announcement, an ad, a tutorial/showcase, a tool dump, "
-                "a giveaway, off-topic, or anything with no real pain to respond to."
+                "You filter Reddit posts for a founder of VELA — a no-code personal AI assistant inside Telegram "
+                "(remembers you, reminders, web/search, weather, rates, Google/Notion, translation, voice-to-text). "
+                "He replies with genuine value where his product/experience is relevant. Answer ONE word: yes or no.\n"
+                "yes = an ORDINARY (non-developer) person describes a real problem, frustration, or is looking for / asking "
+                "to recommend a personal AI assistant or bot to help with everyday life or work — something VELA's world fits, "
+                "and a helpful human reply makes sense.\n"
+                "no (reject ALL of these):\n"
+                "- DEVELOPER/technical posts: building/hosting/self-hosting, routing between LLM providers, API/infra, "
+                "auth/cost-tracking, 'build this automation/workflow', coding help, prompt engineering.\n"
+                "- a joke, meme, rant, or observation with no real ask.\n"
+                "- a tech bug of a specific bot/tool/library (e.g. two bots conflicting in a group).\n"
+                "- self-promotion ('I built/launched X'), release announcements, ads, tutorials, showcases, tool dumps, giveaways.\n"
+                "- anything off-topic or with no genuine pain a personal-assistant founder could helpfully answer."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
