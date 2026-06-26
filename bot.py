@@ -5353,6 +5353,7 @@ async def _rc_generate(update, pain):
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
         comment = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
         comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
     except Exception as e:
@@ -5406,6 +5407,7 @@ async def _xr_generate(update, post):
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
         reply = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
         reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
     except Exception as e:
