@@ -5456,21 +5456,23 @@ def _downgrade_nonnative(text):
         return text
 
 
-def _enforce_short(text, max_words=45):
-    """Механический потолок длины. Opus игнорит текстовый лимит в промпте и пишет эссе —
-    если коммент длиннее max_words, Sonnet сжимает его до 1-2 коротких предложений,
-    сохраняя смысл, позицию и не-нейтивный B1-B2 стиль. Не зависит от послушания Opus."""
+def _enforce_short(text, max_words=85):
+    """Механический потолок длины ТОЛЬКО против эссе. Opus игнорит лимит в промпте и
+    иногда пишет простыню — если коммент длиннее max_words, Sonnet ужимает его до 3-4
+    коротких предложений (~55 слов), сохраняя 1-2 конкретные мысли, позицию и B1-B2
+    стиль. НЕ режет до одной строки — нижнюю границу держит сам промпт генератора."""
     if not text or len(text.split()) <= max_words:
         return text
     try:
         r = anthropic.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=200,
+            max_tokens=250,
             system=(
-                "You shorten a reddit comment HARD. Cut it to at most 2 short sentences, about 30-40 words max, keeping the "
-                "single most useful point and the author's stance. Keep the casual B1-B2 non-native voice and any small "
-                "grammar mistakes — do NOT polish into fluent native English, do NOT add words. One single block, no line "
-                "breaks, no em-dashes, no 'honestly'. Output ONLY the shortened comment."
+                "You trim a too-long reddit comment down to about 3-4 short sentences, ~55 words max, keeping the one or two "
+                "most useful concrete points and the author's stance. Do NOT cut it to a single line — keep it substantive, "
+                "just not an essay. Keep the casual B1-B2 non-native voice and any small grammar mistakes — do NOT polish "
+                "into fluent native English, do NOT add new ideas. One single block, no line breaks, no em-dashes, no "
+                "'honestly'. Output ONLY the trimmed comment."
             ),
             messages=[{"role": "user", "content": text}],
         )
@@ -5526,11 +5528,11 @@ async def _rc_generate(update, pain, image_data=None):
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
                 "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
                 "REDDIT BEST PRACTICES (from research):\n"
-                "- LENGTH (critical, keep it SHORT): research on real reddit comments shows median ~9 words and average ~16 "
-                "— most are a single line or two. Target roughly 15-40 words. Even a genuinely complex thread must stay tight: "
-                "AT MOST 2-3 short sentences, never more. NEVER write an essay, a mini-blog, or multiple paragraphs — a long "
-                "comment is the #1 thing to avoid here, it reads as AI and nobody reads it. Always ONE single block of text, "
-                "never two paragraphs, no blank line. When in doubt, cut it shorter.\n"
+                "- LENGTH: keep it tight and human, but MATCH the thread. A simple question → 1-2 sentences. A real "
+                "discussion or technical thread (like this kind) → about 3-4 short sentences with one or two concrete, "
+                "specific points. Hard limits on BOTH ends: never a single throwaway line that looks dismissive on a "
+                "substantive thread, and NEVER an essay, mini-blog, or multiple paragraphs (that screams AI). Roughly 30-70 "
+                "words depending on the thread. Always ONE single block of text, never two paragraphs, no blank line.\n"
                 "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
