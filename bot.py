@@ -4664,13 +4664,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
 
-    # Двухшаговые генераторы: /rc или /xr ждут текст следующим сообщением
+    # Двухшаговые генераторы: /rc или /xr ждут текст и/или ФОТО следующим сообщением
     pending = context.user_data.pop("await_gen", None) if context.user_data else None
-    if pending == "rc" and user_text.strip():
-        await _rc_generate(update, user_text.strip())
-        return
-    if pending == "xr" and user_text.strip():
-        await _xr_generate(update, user_text.strip())
+    if pending in ("rc", "xr"):
+        gen_img = None
+        if update.message.photo:  # только фото, видео не поддерживается
+            try:
+                import base64 as _b64
+                gphoto = update.message.photo[-1]
+                gtf = await context.bot.get_file(gphoto.file_id)
+                gbuf = await gtf.download_as_bytearray()
+                gen_img = {"media_type": "image/jpeg", "data": _b64.b64encode(bytes(gbuf)).decode()}
+            except Exception as e:
+                logger.warning(f"await_gen photo download failed: {e}")
+        gen_text = (update.message.text or update.message.caption or "").strip()
+        if not gen_text and not gen_img:
+            context.user_data["await_gen"] = pending  # ничего не пришло — ждём дальше
+            await update.message.reply_text("Кинь текст треда или фото 👇")
+            return
+        if pending == "rc":
+            await _rc_generate(update, gen_text, gen_img)
+        else:
+            await _xr_generate(update, gen_text, gen_img)
         return
 
     # В группах — отвечать только на @mention или reply на сообщение бота
@@ -5290,16 +5305,42 @@ def _strip_ai_tells(text):
         return text
 
 
+def _describe_image(image_data):
+    """Анализ фото из треда — Sonnet (дешевле Opus), отдаёт короткое текстовое описание для генератора."""
+    if not image_data:
+        return ""
+    try:
+        r = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=300,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": image_data["media_type"],
+                                             "data": image_data["data"]}},
+                {"type": "text", "text": "This image is attached to a reddit/X thread. Describe what it shows in 1-3 "
+                 "factual sentences (screenshot, diagram, chart, UI, error, etc), focusing on what's relevant for "
+                 "writing a reply to the thread. Be brief."},
+            ]}],
+        )
+        return "".join(b.text for b in r.content if hasattr(b, "text")).strip()
+    except Exception as e:
+        logger.warning(f"_describe_image failed: {e}")
+        return ""
+
+
 async def cmd_rc(update, context):
-    """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда следующим сообщением."""
+    """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда (и/или фото) следующим сообщением."""
     context.user_data["await_gen"] = "rc"
-    await update.message.reply_text("Кидай текст треда")
+    await update.message.reply_text("Кидай текст треда (можно с фото)")
 
 
-async def _rc_generate(update, pain):
-    """Reddit-коммент, шаг 2: генерация по присланному тексту (Sonnet, без рекламы, без LLM-щины)."""
+async def _rc_generate(update, pain, image_data=None):
+    """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Opus. Без рекламы, без LLM-щины."""
     await update.message.reply_text("✍️ Пишу коммент...")
     try:
+        if image_data:
+            _d = _describe_image(image_data)   # фото анализирует Sonnet, Opus получает только текст-описание
+            if _d:
+                pain = (pain + "\n\n[Image attached to the thread, described]: " + _d).strip()
         resp = anthropic.messages.create(
             model="claude-opus-4-8",
             max_tokens=400,
@@ -5367,10 +5408,14 @@ async def cmd_xr(update, context):
     await update.message.reply_text("Кидай текст X-поста 👇")
 
 
-async def _xr_generate(update, post):
-    """X-реплай, шаг 2: генерация по присланному тексту (Sonnet, X best practices)."""
+async def _xr_generate(update, post, image_data=None):
+    """X-реплай, шаг 2: текст (+ фото через Sonnet-описание) → Opus."""
     await update.message.reply_text("✍️ Пишу реплай...")
     try:
+        if image_data:
+            _d = _describe_image(image_data)   # фото анализирует Sonnet, Opus получает только текст-описание
+            if _d:
+                post = (post + "\n\n[Image attached to the post, described]: " + _d).strip()
         resp = anthropic.messages.create(
             model="claude-opus-4-8",
             max_tokens=300,
