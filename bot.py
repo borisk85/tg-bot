@@ -5149,18 +5149,19 @@ def _reddit_worthy(title, body):
             model="claude-haiku-4-5-20251001",
             max_tokens=5,
             system=(
-                "You filter Reddit posts for a founder in the AI-assistant / Telegram-bot / productivity space who replies "
-                "with GENUINE value to build presence (the reply often won't mention his product at all). "
-                "Answer ONE word: yes or no.\n"
-                "yes = a thread where a thoughtful human reply genuinely adds value: someone asks for a recommendation, "
-                "shares a real problem or frustration, asks an opinion/discussion question, or discusses AI assistants / bots / "
-                "productivity / choosing an AI in a way you can meaningfully contribute to (with or without mentioning a product).\n"
-                "no (reject only clear non-fits):\n"
-                "- pure spam, ads, self-promotion ('I built/launched X'), release announcements, tutorials/showcases, tool dumps, giveaways.\n"
-                "- a joke/meme/rant with no real point to engage.\n"
-                "- a narrow technical bug of one specific tool/library where you have nothing useful to add.\n"
-                "- clearly off-topic (not about AI assistants, bots, productivity, or the everyday problems they solve).\n"
-                "When unsure but a substantive on-topic reply is possible, answer yes."
+                "You filter Reddit posts for a founder in the AI-assistant / Telegram-bot / productivity space who comments "
+                "with genuine value. EVERY post you pass YES he WILL comment on, no second filtering — so pass ONLY posts that "
+                "are genuinely worth a substantive on-topic reply. Answer ONE word: yes or no.\n"
+                "yes ONLY if the post clearly gives you something real to respond to: an explicit question, a request for a "
+                "recommendation, a stated problem/frustration, or a genuine opinion/discussion prompt about AI assistants, bots, "
+                "automation, productivity, or choosing an AI — where a thoughtful on-topic reply obviously fits.\n"
+                "no for EVERYTHING else, including:\n"
+                "- a joke, meme, rant, story, flex, or observation with NO real question or problem to answer (even if it's about AI).\n"
+                "- a narrow technical bug of one specific tool/bot/library, or pure coding/troubleshooting help for a dev setup.\n"
+                "- spam, ads, self-promotion ('I built/launched X'), release announcements, tutorials, showcases, tool dumps, giveaways.\n"
+                "- off-topic (not about AI assistants, bots, automation, productivity, or the everyday problems they solve).\n"
+                "If there is no clear question or problem to engage with, OR you are unsure, answer no. Dropping a borderline "
+                "post is much better than passing one that is not worth commenting on."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
@@ -5274,7 +5275,8 @@ async def _rc_generate(update, pain):
                 "- NO marketing words (revolutionary, game-changing, best solution, seamless, powerful).\n"
                 "- Casual. Light slang/abbreviations ok (tbh, imo, ngl, gonna, kinda).\n"
                 "- No emojis, no hashtags.\n"
-                "- END with a real question back to the author when it fits — pulls people into replying.\n"
+                "- A question back is fine SOMETIMES, but do NOT end every comment with one — a question in every reply is "
+                "itself an AI tell. Often just state your take and stop. Vary it; most comments need no question at all.\n"
                 "PROMOTION (Reddit's real current rule: be a genuine participant, not a promoter. "
                 "The old rigid 9:1 ratio was officially retired — mods judge overall behavior, not a percentage):\n"
                 "- DEFAULT is NO product. Genuinely help. The vast majority of replies must have zero product mention.\n"
