@@ -5456,23 +5456,35 @@ def _downgrade_nonnative(text):
         return text
 
 
-def _enforce_short(text, max_words=85):
-    """Механический потолок длины ТОЛЬКО против эссе. Opus игнорит лимит в промпте и
-    иногда пишет простыню — если коммент длиннее max_words, Sonnet ужимает его до 3-4
-    коротких предложений (~55 слов), сохраняя 1-2 конкретные мысли, позицию и B1-B2
-    стиль. НЕ режет до одной строки — нижнюю границу держит сам промпт генератора."""
+def _target_words(thread):
+    """Детерминированный потолок длины коммента из длины/типа треда (на основе ресёрча:
+    реальные reddit-комменты короче поста и масштабируются с глубиной обсуждения).
+    Короткий вопрос → короткий ответ; развёрнутая дискуссия → до 3-4 предложений."""
+    n = len((thread or "").split())
+    if n < 40:        # короткий вопрос / простая боль
+        return 30
+    if n < 150:       # средний тред
+        return 50
+    return 70         # развёрнутый дискуссионный / технический
+
+
+def _enforce_short(text, max_words=70):
+    """Механический потолок длины против эссе. Opus игнорит лимит в промпте — если коммент
+    длиннее max_words (потолок задаётся из треда через _target_words), Sonnet ужимает его,
+    сохраняя 1-2 конкретные мысли, позицию и B1-B2 стиль. НЕ режет до одной строки."""
     if not text or len(text.split()) <= max_words:
         return text
+    target = max(20, max_words - 10)
     try:
         r = anthropic.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=250,
             system=(
-                "You trim a too-long reddit comment down to about 3-4 short sentences, ~55 words max, keeping the one or two "
-                "most useful concrete points and the author's stance. Do NOT cut it to a single line — keep it substantive, "
-                "just not an essay. Keep the casual B1-B2 non-native voice and any small grammar mistakes — do NOT polish "
-                "into fluent native English, do NOT add new ideas. One single block, no line breaks, no em-dashes, no "
-                "'honestly'. Output ONLY the trimmed comment."
+                f"You trim a too-long reddit comment down to about {target} words max (roughly 2-4 short sentences), keeping "
+                "the one or two most useful concrete points and the author's stance. Do NOT cut it to a single line — keep it "
+                "substantive, just not an essay. Keep the casual B1-B2 non-native voice and any small grammar mistakes — do "
+                "NOT polish into fluent native English, do NOT add new ideas. One single block, no line breaks, no em-dashes, "
+                "no 'honestly'. Output ONLY the trimmed comment."
             ),
             messages=[{"role": "user", "content": text}],
         )
@@ -5583,7 +5595,7 @@ async def _rc_generate(update, pain, image_data=None):
         comment = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         comment = _downgrade_nonnative(comment)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
-        comment = _enforce_short(comment)   # механический потолок длины (Opus игнорит лимит в промпте)
+        comment = _enforce_short(comment, max_words=_target_words(pain))   # потолок длины из треда (Opus игнорит лимит в промпте)
         comment = _tidy(comment)   # один блок + убрать honestly
         comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
@@ -5651,7 +5663,7 @@ async def _xr_generate(update, post, image_data=None):
         reply = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
-        reply = _enforce_short(reply)   # механический потолок длины (Opus игнорит лимит в промпте)
+        reply = _enforce_short(reply, max_words=40)   # X-реплай всегда короткий
         reply = _tidy(reply)   # один блок + убрать honestly
         reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
