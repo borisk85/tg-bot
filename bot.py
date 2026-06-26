@@ -15,6 +15,7 @@ from telegram import InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, MessageHandler, CommandHandler, InlineQueryHandler, filters, ContextTypes
 
 import re
+import html
 import threading
 import requests
 import redis
@@ -5064,6 +5065,207 @@ async def cmd_xradar(update, context):
         await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
 
 
+# ── Reddit-радар: свежие треды с РЕАЛЬНОЙ болью под коммент (read-only RSS, аккаунт не трогаем) ──
+REDDIT_SUBS = ["openclaw", "SideProject", "SaaS", "ChatGPTCoding", "ArtificialInteligence",
+               "MachineLearning", "AIAssisted", "ProductivityApps", "aiagents", "telegram"]
+# все боли из ресёрча: завести ассистента, память, напоминалка, разрозненность, суммаризация, перевод, голос, интеграции
+REDDIT_PAIN_KEYWORDS = [
+    "api key", "byok", "bring your own key", "openai key", "anthropic key", "expensive", "free tier",
+    "rate limit", "token cost", "no code", "no-code", "without coding", "n8n", "self-host", "self host",
+    "vps", "setup", "complicated", "build a bot", "my own bot", "assistant bot", "alternative to",
+    "forgets", "no memory", "doesn't remember", "persistent memory", "loses context", "long-term memory",
+    "remind me", "reminder", "keep forgetting", "track tasks", "all in one", "scattered", "juggling apps",
+    "summarize", "tldr", "catch up", "too many messages", "missed messages", "translate", "language barrier",
+    "transcribe", "voice to text", "voice note", "notion", "google calendar", "gmail",
+    "telegram bot", "telegram assistant", "ai assistant", "personal assistant",
+]
+REDDIT_TOPIC = ["bot", "assistant", "agent", " ai ", "a.i.", "llm", "gpt", "claude", "chatbot",
+                "telegram", "automat", "workflow", "integration", "ai-"]
+REDDIT_SPAM = ["discount", "promo code", "coupon", "affiliate", "airdrop", "giveaway", "presale",
+               "referral code", "sign up now", "limited offer"]
+
+
+def _reddit_fetch(url, retries=3):
+    """GET RSS с retry на 429 (reddit жёстко лимитит анонимный RSS)."""
+    import time as _t
+    for a in range(retries):
+        try:
+            r = requests.get(url, headers={"User-Agent": "pain-research/0.1 (read-only RSS)"}, timeout=25)
+            if r.status_code == 429 and a < retries - 1:
+                _t.sleep(12 * (a + 1)); continue
+            r.raise_for_status()
+            return r.text
+        except Exception:
+            if a == retries - 1:
+                return ""
+            _t.sleep(8)
+    return ""
+
+
+def _reddit_strip(s):
+    s = html.unescape(html.unescape(s or ""))
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"submitted by.*?\[link\].*?\[comments\]", " ", s, flags=re.S | re.I)
+    s = re.sub(r"\[link\]|\[comments\]", " ", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _reddit_parse(xml):
+    out = []
+    for block in re.findall(r"<entry\b.*?</entry>", xml, re.S):
+        def grab(tag):
+            m = re.search(r"<%s\b[^>]*>(.*?)</%s>" % (tag, tag), block, re.S)
+            return html.unescape(re.sub(r"<[^>]+>", "", m.group(1)).strip()) if m else ""
+        link = ""
+        ml = re.search(r'<link[^>]*href="([^"]+)"', block)
+        if ml:
+            link = html.unescape(ml.group(1))
+        msub = re.search(r"/r/([^/]+)/comments/", link)
+        mid = re.search(r"/comments/([a-z0-9]+)/", link)
+        out.append({"title": grab("title"), "link": link,
+                    "sub": msub.group(1) if msub else "",
+                    "id": mid.group(1) if mid else link,
+                    "updated": grab("updated") or grab("published"),
+                    "body": _reddit_strip(grab("content"))})
+    return out
+
+
+def _reddit_worthy(title, body):
+    """Sonnet/Haiku-классификатор: реальная ли это боль под содержательный коммент (True) или мусор/self-promo/реклама (False)."""
+    t = (title + "\n" + body).strip()
+    if len(t) < 25:
+        return False
+    try:
+        resp = anthropic.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            system=(
+                "You filter Reddit posts for someone who replies with genuine value in threads about AI assistants, "
+                "bots, automation, productivity. Answer ONE word: yes or no.\n"
+                "yes = the author states a real problem, frustration, question, or is looking for a solution/recommendation "
+                "that a knowledgeable person can give a substantive, helpful reply to.\n"
+                "no = self-promotion ('I built/launched X'), a release announcement, an ad, a tutorial/showcase, a tool dump, "
+                "a giveaway, off-topic, or anything with no real pain to respond to."
+            ),
+            messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
+        )
+        ans = "".join(b.text for b in resp.content if hasattr(b, "text")).strip().lower()
+        return ans.startswith("y")
+    except Exception as e:
+        logger.warning(f"reddit_worthy classify failed: {e}")
+        return True
+
+
+async def cmd_reddit(update, context):
+    """Reddit-радар: свежие треды с реальной болью под коммент. Read-only RSS, аккаунт не трогается."""
+    import time as _t
+    from datetime import datetime, timezone, timedelta
+    await update.message.reply_text("🔎 Сканирую Reddit по болям, 30-60 сек...")
+    keys = [k.lower() for k in REDDIT_PAIN_KEYWORDS]
+    groups = [REDDIT_SUBS[i:i + 3] for i in range(0, len(REDDIT_SUBS), 3)]
+    raw = []
+    for gi, group in enumerate(groups):
+        xml = _reddit_fetch("https://www.reddit.com/r/%s/new/.rss?limit=60" % "+".join(group))
+        if xml:
+            raw.extend(_reddit_parse(xml))
+        if gi < len(groups) - 1:
+            _t.sleep(5)
+    # грубое сито: свежесть + болевой ключ + тема + не спам + не показан ранее
+    cutoff = datetime.now(timezone.utc) - timedelta(days=10)
+    cand = []
+    for e in raw:
+        if not e["link"] or not e["id"]:
+            continue
+        try:
+            if datetime.fromisoformat(e["updated"].replace("Z", "+00:00")) < cutoff:
+                continue
+        except Exception:
+            pass
+        blob = (e["title"] + " " + e["body"]).lower()
+        if not any(k in blob for k in keys):
+            continue
+        if not any(tt in blob for tt in REDDIT_TOPIC):
+            continue
+        if any(sp in blob for sp in REDDIT_SPAM):
+            continue
+        if redis_client:
+            try:
+                if redis_client.exists(f"reddit:shown:{e['id']}"):
+                    continue
+            except Exception:
+                pass
+        cand.append(e)
+    if not cand:
+        await update.message.reply_text("🔎 Свежих болей по темам за 10 дней не нашлось. Загляни позже.")
+        return
+    await update.message.reply_text(f"🔎 Нашёл {len(cand)} кандидатов, отсеиваю self-promo/рекламу/мусор...")
+    worthy = [e for e in cand[:40] if _reddit_worthy(e["title"], e["body"])]
+    if not worthy:
+        await update.message.reply_text("🔎 Свежее есть, но всё мусор — анонсы, реклама, self-promo. Под коммент ничего, загляни позже.")
+        return
+    top = worthy[:12]
+    if redis_client:
+        for e in top:
+            try:
+                redis_client.set(f"reddit:shown:{e['id']}", "1", ex=1209600)
+            except Exception:
+                pass
+    blocks = [f"🔎 Reddit-радар — {len(top)} тредов ПОД КОММЕНТ (из {len(cand)} сырых, мусор отсеян).\n"
+              f"Открой тред → ответь /rc + текст боли, дам коммент.\n━━━━━━━━━━━━━━━━━━━━"]
+    for i, e in enumerate(top, 1):
+        body = " ".join(e["body"].split())
+        if len(body) > 200:
+            body = body[:197] + "..."
+        blocks.append(f"\n{i}. 📍 r/{e['sub']} · {e['updated'][:10]}\n"
+                      f"📌 {e['title'][:130]}\n"
+                      f"💬 {body}\n"
+                      f"➡️ {e['link']}")
+    full = "\n".join(blocks)
+    for i in range(0, len(full), 4096):
+        await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
+
+
+async def cmd_rc(update, context):
+    """Генератор reddit-коммента: /rc <текст боли/треда> → живой человеческий коммент (Sonnet, без рекламы, без LLM-щины)."""
+    parts = (update.message.text or "").split(None, 1)
+    pain = parts[1].strip() if len(parts) > 1 else ""
+    if not pain:
+        await update.message.reply_text("Кинь так: /rc и следом текст боли или треда. Я верну готовый коммент.")
+        return
+    await update.message.reply_text("✍️ Пишу коммент...")
+    try:
+        resp = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            system=(
+                "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
+                "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
+                "REDDIT BEST PRACTICES (from research):\n"
+                "- Length 50-150 words — the comment sweet spot for upvotes. Never a wall of text. Short paragraphs, 2-3 sentences max.\n"
+                "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
+                "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
+                "- Sound like a friend giving honest advice, not a brand.\n"
+                "STYLE — must NOT look like AI:\n"
+                "- Plain simple English like a smart non-native. Short everyday words. A tiny imperfection is fine.\n"
+                "- NO em-dashes anywhere. NO LLM cliches (game-changer, honestly, I've been there, that said, delve, "
+                "leverage, moreover, furthermore, it's not just X it's Y).\n"
+                "- NO marketing words (revolutionary, game-changing, best solution, seamless, powerful).\n"
+                "- Casual. Light slang/abbreviations ok (tbh, imo, ngl, gonna, kinda).\n"
+                "- No emojis, no hashtags.\n"
+                "PROMOTION:\n"
+                "- NO advertising. Do NOT promote or mention any product/tool/VELA, unless they explicitly ask what you use. "
+                "If you ever do mention it, disclose plainly that it's yours. Default: just be helpful, no product.\n"
+                "Output only the reply text, nothing else."
+            ),
+            messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
+        )
+        comment = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
+    except Exception as e:
+        logger.error(f"cmd_rc failed: {e}", exc_info=True)
+        await update.message.reply_text("Не вышло сгенерить коммент, попробуй ещё раз.")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -5089,6 +5291,8 @@ def main():
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(CommandHandler("xradar", cmd_xradar))
+    app.add_handler(CommandHandler("reddit", cmd_reddit))
+    app.add_handler(CommandHandler("rc", cmd_rc))
     app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
@@ -5106,6 +5310,8 @@ def main():
             BotCommand("about", "Рассказать о себе"),
             BotCommand("reminders", "Активные напоминания"),
             BotCommand("xradar", "Горячие посты X по моим темам"),
+            BotCommand("reddit", "Свежие треды Reddit с болью под коммент"),
+            BotCommand("rc", "Сгенерить коммент: /rc + текст боли"),
         ])
     app.post_init = post_init
 
