@@ -4682,14 +4682,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if gen_img and not gen_text:
             context.user_data["gen_img"] = gen_img
             context.user_data["await_gen"] = pending
-            await update.message.reply_text("Фото принял. Теперь кинь текст треда отдельным сообщением 👇")
+            await update.message.reply_text("Фото принял. Теперь кинь текст треда отдельным сообщением")
             return
         # текст пришёл — подхватываем ранее присланное фото (если было)
         if gen_text and not gen_img:
             gen_img = context.user_data.pop("gen_img", None)
         if not gen_text and not gen_img:
             context.user_data["await_gen"] = pending
-            await update.message.reply_text("Кинь текст треда или фото 👇")
+            await update.message.reply_text("Кинь текст треда или фото")
             return
         context.user_data.pop("gen_img", None)
         if pending == "rc":
@@ -5201,7 +5201,7 @@ async def cmd_reddit(update, context):
     """Reddit-радар: свежие треды с реальной болью под коммент. Read-only RSS, аккаунт не трогается."""
     import time as _t
     from datetime import datetime, timezone, timedelta
-    await update.message.reply_text("🔎 Сканирую Reddit по болям, 30-60 сек...")
+    await update.message.reply_text("Сканирую Reddit по болям, 30-60 сек...")
     keys = [k.lower() for k in REDDIT_PAIN_KEYWORDS]
     groups = [REDDIT_SUBS[i:i + 3] for i in range(0, len(REDDIT_SUBS), 3)]
     raw = []
@@ -5237,12 +5237,12 @@ async def cmd_reddit(update, context):
                 pass
         cand.append(e)
     if not cand:
-        await update.message.reply_text("🔎 Свежих болей по темам за 10 дней не нашлось. Загляни позже.")
+        await update.message.reply_text("Свежих болей по темам за 10 дней не нашлось. Загляни позже.")
         return
-    await update.message.reply_text(f"🔎 Нашёл {len(cand)} кандидатов, отсеиваю self-promo/рекламу/мусор...")
+    await update.message.reply_text(f"Нашёл {len(cand)} кандидатов, отсеиваю self-promo/рекламу/мусор...")
     worthy = [e for e in cand[:40] if _reddit_worthy(e["title"], e["body"])]
     if not worthy:
-        await update.message.reply_text("🔎 Свежее есть, но всё мусор — анонсы, реклама, self-promo. Под коммент ничего, загляни позже.")
+        await update.message.reply_text("Свежее есть, но всё мусор — анонсы, реклама, self-promo. Под коммент ничего, загляни позже.")
         return
     top = worthy[:12]
     if redis_client:
@@ -5345,7 +5345,7 @@ async def cmd_rc(update, context):
 
 async def _rc_generate(update, pain, image_data=None):
     """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Opus. Без рекламы, без LLM-щины."""
-    await update.message.reply_text("✍️ Пишу коммент...")
+    await update.message.reply_text("Пишу коммент...")
     try:
         if image_data:
             _d = _describe_image(image_data)   # фото анализирует Sonnet, Opus получает только текст-описание
@@ -5415,12 +5415,12 @@ async def _rc_generate(update, pain, image_data=None):
 async def cmd_xr(update, context):
     """X-реплай, шаг 1: /xr → ждём текст поста следующим сообщением."""
     context.user_data["await_gen"] = "xr"
-    await update.message.reply_text("Кидай текст X-поста 👇")
+    await update.message.reply_text("Кидай текст X-поста")
 
 
 async def _xr_generate(update, post, image_data=None):
     """X-реплай, шаг 2: текст (+ фото через Sonnet-описание) → Opus."""
-    await update.message.reply_text("✍️ Пишу реплай...")
+    await update.message.reply_text("Пишу реплай...")
     try:
         if image_data:
             _d = _describe_image(image_data)   # фото анализирует Sonnet, Opus получает только текст-описание
