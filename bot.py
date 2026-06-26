@@ -5361,6 +5361,14 @@ def _tidy(text):
     рерайта его не ловит). Дёшево, без вызова модели."""
     if not text:
         return text
+    # модель иногда выводит самокоррекцию вслух ("Wait, I used an em-dash. Let me redo.")
+    # и следом переписанную версию — берём только финальную, после последнего такого маркера.
+    parts = re.split(
+        r"(?i)\b(?:let me (?:redo|rewrite|fix|try again)|i'?ll redo|here'?s the (?:fixed|rewrite|redo|new))\b[.: ]*",
+        text)
+    if len(parts) > 1:
+        text = parts[-1]
+    text = re.sub(r"(?i)^\s*wait[,.][^.!?\n]*[.!?]\s*", "", text)   # ведущее "Wait, ...."
     text = re.sub(r"\s*\n\s*\n+\s*", " ", text)          # абзацы → один блок
     text = re.sub(r"\n+", " ", text)                       # любые переносы → пробел
     text = re.sub(r"(?i)\bhonestly\b[ ,]*", "", text)     # убрать honestly
@@ -5600,7 +5608,9 @@ async def _rc_generate(update, pain, image_data=None):
                 "varied sentence length, not an even rhythm; no em-dashes; no AI cliches or marketing words; no neat 3-item "
                 "comma list; one single block (no two paragraphs); length fits the thread (short by default, longer only if "
                 "genuinely complex); no ad or pitch, your-experience detail only if it truly fits. If any fails, fix it first.\n"
-                "Output only the reply text, nothing else."
+                "OUTPUT ONLY the single final reply text. NEVER write your reasoning, NEVER write 'wait', 'let me redo', "
+                "'let me rewrite', NEVER show a draft then a correction — do all that silently and output only the one final "
+                "clean reply, nothing else."
             ),
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
@@ -5637,11 +5647,14 @@ async def _xr_generate(update, post, image_data=None):
             system=(
                 "You are a real indie founder, a NON-native English speaker, replying to a post on X/Twitter. "
                 "Write ONE reply that reads as a genuine human, never AI.\n"
-                "X BEST PRACTICES (from research):\n"
-                "- Be substantive and SPECIFIC to this exact post — genuine replies that add to the conversation get "
-                "surfaced (reply quality is a ranking signal on X). No generic praise.\n"
-                "- Short and punchy, X style. One clear point or one real question back. No padding.\n"
+                "X BEST PRACTICES (research-based, X differs from reddit):\n"
+                "- Reply quality is a DIRECT ranking signal since 2026, and Premium users can downvote replies flagged as "
+                "AI-generated. So be specific and genuine to THIS exact post — vague or AI-sounding replies get downranked.\n"
+                "- VERY SHORT: X replies do best at ~71-100 characters (roughly 12-18 words), one clear point. Shorter than "
+                "a reddit comment. No padding, no preamble.\n"
+                "- Be substantive and SPECIFIC to this exact post. No generic praise.\n"
                 "- Authentic engagement, not engagement-bait. Don't ask people to follow/like.\n"
+                "- Do NOT put external links in the reply (links cut reach 30-50% on X).\n"
                 "STYLE — must NOT look like AI:\n"
                 "- You are NOT a native English speaker, level B1-B2. Mostly simple words and simple sentences. Grammar is "
                 "NOT perfect: let natural non-native mistakes through (wrong or missing articles a/the, off prepositions, "
@@ -5673,15 +5686,17 @@ async def _xr_generate(update, post, image_data=None):
                 "personal claims; B1-B2 English with real mistakes (NOT flawless); no em-dashes; "
                 "no AI cliches, no hype/marketing words; short and punchy, specific to the post; no neat 3-item comma list; "
                 "no ad or pitch, your-experience detail only if it truly fits, else none. If any fails, fix it before sending.\n"
-                "Output only the reply text, nothing else."
+                "OUTPUT ONLY the single final reply text. NEVER write your reasoning, NEVER write 'wait', 'let me redo', "
+                "'let me rewrite', NEVER show a draft then a correction — do all that silently and output only the one final "
+                "clean reply, nothing else."
             ),
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
         reply = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
-        reply = _enforce_short(reply, max_words=40)   # X-реплай всегда короткий
-        reply = _tidy(reply)   # один блок + убрать honestly
+        reply = _enforce_short(reply, max_words=25)   # X-реплай короткий (X идеал ~71-100 символов)
+        reply = _tidy(reply)   # один блок + убрать honestly + срезать самокоррекцию модели
         reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
     except Exception as e:
