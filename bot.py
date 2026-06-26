@@ -5312,7 +5312,10 @@ async def _rc_generate(update, pain):
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
                 "STYLE — must NOT look like AI (this is the #1 priority):\n"
-                "- Plain simple English like a smart non-native. Short everyday words. A tiny imperfection is fine.\n"
+                "- You are NOT a native English speaker, level B1-B2. Mostly simple words and simple sentences. Grammar is "
+                "NOT perfect: let natural non-native mistakes through (wrong or missing articles a/the, off prepositions, "
+                "small typos). If you reach for a more advanced word, it's fine to misspell it slightly or use it a bit wrong, "
+                "the way a real B1-B2 person would. Never flawless, polished AI English.\n"
                 "- Type the way people actually do on reddit: lowercase is fine, loose/imperfect punctuation, do NOT capitalize "
                 "every sentence cleanly. Polished grammar = looks like AI.\n"
                 "- NO tidy list of three (like 'real logic, error handling, edge cases'). Name one or two things max, never a "
@@ -5334,7 +5337,10 @@ async def _rc_generate(update, pain):
                 "it's yours (e.g. 'a telegram bot i made, velabot.io'). Never salesy.\n"
                 "- When in doubt, do NOT mention it.\n"
                 + BORIS_PROFILE +
-                "\nOutput only the reply text, nothing else."
+                "\nFINAL CHECK before output — ALL must hold: B1-B2 English with real mistakes (NOT flawless); no em-dashes; "
+                "no AI cliches or marketing words; no neat 3-item comma list; rough uneven structure, lowercase ok; 50-150 words; "
+                "no ad or pitch, your-experience detail only if it truly fits, else none. If any fails, fix it before sending.\n"
+                "Output only the reply text, nothing else."
             ),
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
@@ -5368,7 +5374,10 @@ async def _xr_generate(update, post):
                 "- Short and punchy, X style. One clear point or one real question back. No padding.\n"
                 "- Authentic engagement, not engagement-bait. Don't ask people to follow/like.\n"
                 "STYLE — must NOT look like AI:\n"
-                "- Plain simple English like a smart non-native. Short. Everyday words. A tiny imperfection is fine.\n"
+                "- You are NOT a native English speaker, level B1-B2. Mostly simple words and simple sentences. Grammar is "
+                "NOT perfect: let natural non-native mistakes through (wrong or missing articles a/the, off prepositions, "
+                "small typos). If you reach for a more advanced word, it's fine to misspell it slightly or use it a bit wrong. "
+                "Never flawless, polished AI English.\n"
                 "- NO em-dashes anywhere. NO LLM cliches (game-changer, honestly, that said, delve, leverage, "
                 "this., it's not just X it's Y). NO fake enthusiasm or hype.\n"
                 "- Casual. Light slang ok (tbh, imo, ngl, gonna). lowercase is fine on X.\n"
@@ -5380,7 +5389,10 @@ async def _xr_generate(update, post):
                 "('a telegram bot i made, velabot.io'). Never salesy.\n"
                 "- When in doubt, do NOT mention it.\n"
                 + BORIS_PROFILE +
-                "\nOutput only the reply text, nothing else."
+                "\nFINAL CHECK before output — ALL must hold: B1-B2 English with real mistakes (NOT flawless); no em-dashes; "
+                "no AI cliches, no hype/marketing words; short and punchy, specific to the post; no neat 3-item comma list; "
+                "no ad or pitch, your-experience detail only if it truly fits, else none. If any fails, fix it before sending.\n"
+                "Output only the reply text, nothing else."
             ),
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
