@@ -5243,7 +5243,7 @@ async def cmd_reddit(update, context):
 async def cmd_rc(update, context):
     """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда следующим сообщением."""
     context.user_data["await_gen"] = "rc"
-    await update.message.reply_text("Кидай текст боли или треда 👇")
+    await update.message.reply_text("Кидай текст треда")
 
 
 async def _rc_generate(update, pain):
