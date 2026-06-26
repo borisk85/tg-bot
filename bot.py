@@ -5241,6 +5241,33 @@ async def cmd_reddit(update, context):
         await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
 
 
+def _strip_ai_tells(text):
+    """Механическая самопроверка готового коммента на твёрдые ИИ-маркеры. Найдено → переписываем."""
+    if not text:
+        return text
+    tells = []
+    if "—" in text:
+        tells.append("em-dashes (use simpler punctuation or split the sentence)")
+    if re.search(r"\b[\w']+, [\w']+,? (?:and )?[\w']+\b", text):
+        tells.append("any tidy 3-item comma list like 'X, Y, Z' (name just one or two instead)")
+    if not tells:
+        return text
+    try:
+        r = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            system=("You lightly rewrite a reddit comment so it reads more like a real human and less like AI. "
+                    "Keep the meaning and the casual rough tone, lowercase is fine. Output ONLY the rewritten comment."),
+            messages=[{"role": "user", "content": "Rewrite this comment, removing: " + "; ".join(tells) +
+                       ".\n\nComment:\n" + text}],
+        )
+        out = "".join(b.text for b in r.content if hasattr(b, "text")).strip()
+        return out or text
+    except Exception as e:
+        logger.warning(f"_strip_ai_tells failed: {e}")
+        return text
+
+
 async def cmd_rc(update, context):
     """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда следующим сообщением."""
     context.user_data["await_gen"] = "rc"
@@ -5289,6 +5316,7 @@ async def _rc_generate(update, pain):
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
         comment = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
     except Exception as e:
         logger.error(f"cmd_rc failed: {e}", exc_info=True)
@@ -5333,6 +5361,7 @@ async def _xr_generate(update, post):
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
         reply = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
     except Exception as e:
         logger.error(f"cmd_xr failed: {e}", exc_info=True)
