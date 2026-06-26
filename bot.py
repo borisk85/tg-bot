@@ -4983,15 +4983,30 @@ def _xradar_worthy(text: str) -> bool:
         return False
     try:
         resp = anthropic.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=5,
             system=(
-                "You filter X/Twitter posts for a solo founder who replies with genuine value to grow his account. "
-                "Answer with ONE word: yes or no.\n"
-                "yes = the post states a claim, opinion, insight, question, or real experience that a founder can add a substantive on-topic reply to.\n"
-                "no = engagement-bait or low-value: follow-train / 'let's connect' / 'drop your link', a listicle or tool/resource dump, "
-                "a giveaway, a pure flex / aesthetic / teaser with no real point, an ad or product promo, a testimonial praising another product, "
-                "a portfolio or work showcase, or a celebrity/mainstream post whose audience is not builders/founders."
+                "You are a STRICT filter for X/Twitter posts. A solo founder of a PERSONAL AI ASSISTANT product replies with "
+                "genuine value to grow his account. He should reply ONLY where a substantive on-topic reply truly fits AND the "
+                "audience is relevant (builders, indie founders, people discussing AI assistants/tools/productivity). Answer "
+                "ONE word: yes or no.\n"
+                "YES only if BOTH hold:\n"
+                "1) The post invites a real reply: an explicit question, a stated problem/frustration, or a genuine "
+                "opinion/discussion prompt people will argue with — NOT a closed statement or a finished story.\n"
+                "2) Topic is about: AI assistants / chatbots / choosing or using AI, building small AI products as an indie "
+                "founder, personal productivity with AI, or everyday problems a personal AI assistant solves.\n"
+                "Answer NO (drop) for ALL of these, even if AI is mentioned:\n"
+                "- ADS / PROMOTION / PARTNERSHIPS: 'in partnership with X', shilling a named company/product, a testimonial "
+                "praising another product.\n"
+                "- VIRAL STORY / FLEX / ANECDOTE with no question to engage ('a 68yo built X', 'how I made $$$', 'Upwork gave "
+                "me my break') — a story is not a discussion prompt.\n"
+                "- ENTERPRISE / B2B infra, multi-user permissions, corporate deployment — wrong audience.\n"
+                "- NARROW DEV-TOOLING: Claude Code internals, coding/agent runtime, permissions, devops — developer audience, "
+                "not personal-assistant users.\n"
+                "- off-topic: crypto, hardware, e-commerce, generic career/freelance, celebrity/mainstream.\n"
+                "- engagement-bait: follow-train, 'let's connect', 'drop your link', listicle/tool dump, giveaway, pure teaser.\n"
+                "If the post is a closed statement/flex/story with no hook, OR off the niche, OR promoting something, OR you "
+                "are unsure — answer no. Dropping a borderline post is far better than passing junk."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
