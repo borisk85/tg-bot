@@ -5322,6 +5322,27 @@ def _strip_ai_tells(text):
         return text
 
 
+# Server-side веб-поиск Anthropic: модель сама проверяет факты внутри одного вызова.
+_WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
+
+
+def _final_text_after_search(resp):
+    """Финальный текст ответа ПОСЛЕ последнего блока веб-поиска.
+    Отсекает промежуточные рассуждения модели до/между поисками (server_tool_use,
+    web_search_tool_result). Если поиска не было — вернёт весь текст."""
+    parts = []
+    for b in resp.content:
+        t = getattr(b, "type", None)
+        if t in ("server_tool_use", "web_search_tool_result"):
+            parts = []
+        elif t == "text" and getattr(b, "text", ""):
+            parts.append(b.text)
+    out = "".join(parts).strip()
+    if out:
+        return out
+    return "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "text", "")).strip()
+
+
 def _downgrade_nonnative(text):
     """Принудительно роняет английский коммента до уровня B1-B2 не-нейтива и срезает менторский тон.
     Opus упорно пишет гладко/нативно с поучающими конструкциями — этот слой ломает идиомы, добавляет
@@ -5397,7 +5418,8 @@ async def _rc_generate(update, pain, image_data=None):
                 pain = (pain + "\n\n[Image attached to the thread, described]: " + _d).strip()
         resp = anthropic.messages.create(
             model="claude-opus-4-8",
-            max_tokens=400,
+            max_tokens=1500,
+            tools=[_WEB_SEARCH_TOOL],
             system=(
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
                 "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
@@ -5439,6 +5461,10 @@ async def _rc_generate(update, pain, image_data=None):
                 "it's yours (e.g. 'a telegram bot i made, velabot.io'). Never salesy.\n"
                 "- When in doubt, do NOT mention it.\n"
                 + BORIS_PROFILE +
+                "\nFACT CHECK: if your reply states any concrete fact — a price, a free/paid status, a usage limit, a model "
+                "name or version, a date, a specific feature — you MUST use web_search to verify it is current and true "
+                "BEFORE writing it. If the reply is pure opinion/experience with no concrete facts, do not search. Never "
+                "narrate your searching, never put links or citations in the reply. Output only the final human reply.\n"
                 "\nFINAL CHECK before output, ALL must hold: NOTHING about your experience/workflow that contradicts the "
                 "real facts (you are AI-native, build through AI, NOT by hand) and NOTHING fabricated — if unsure, make zero "
                 "personal claims; B1-B2 English with a few real non-native mistakes (NOT flawless); "
@@ -5449,7 +5475,7 @@ async def _rc_generate(update, pain, image_data=None):
             ),
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
-        comment = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        comment = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         comment = _downgrade_nonnative(comment)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
         comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
@@ -5475,7 +5501,8 @@ async def _xr_generate(update, post, image_data=None):
                 post = (post + "\n\n[Image attached to the post, described]: " + _d).strip()
         resp = anthropic.messages.create(
             model="claude-opus-4-8",
-            max_tokens=300,
+            max_tokens=1500,
+            tools=[_WEB_SEARCH_TOOL],
             system=(
                 "You are a real indie founder, a NON-native English speaker, replying to a post on X/Twitter. "
                 "Write ONE reply that reads as a genuine human, never AI.\n"
@@ -5501,6 +5528,10 @@ async def _xr_generate(update, post, image_data=None):
                 "('a telegram bot i made, velabot.io'). Never salesy.\n"
                 "- When in doubt, do NOT mention it.\n"
                 + BORIS_PROFILE +
+                "\nFACT CHECK: if your reply states any concrete fact — a price, a free/paid status, a usage limit, a model "
+                "name or version, a date, a specific feature — you MUST use web_search to verify it is current and true "
+                "BEFORE writing it. If the reply is pure opinion/experience with no concrete facts, do not search. Never "
+                "narrate your searching, never put links or citations in the reply. Output only the final human reply.\n"
                 "\nFINAL CHECK before output — ALL must hold: NOTHING about your experience/workflow that contradicts the "
                 "real facts (you are AI-native, build through AI, NOT by hand) and NOTHING fabricated — if unsure, make zero "
                 "personal claims; B1-B2 English with real mistakes (NOT flawless); no em-dashes; "
@@ -5510,7 +5541,7 @@ async def _xr_generate(update, post, image_data=None):
             ),
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
-        reply = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        reply = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
         reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
