@@ -5373,7 +5373,9 @@ def _tidy(text):
     text = re.sub(r"\n+", " ", text)                       # любые переносы → пробел
     text = re.sub(r"(?i)\bhonestly\b[ ,]*", "", text)     # убрать honestly
     text = re.sub(r"\s{2,}", " ", text).strip()
-    # после удаления слова в начале предложения — поднять первую букву
+    # капитализация начала КАЖДОГО предложения (после . ! ?) + начала текста.
+    # B1-B2 формальный учащийся так пишет; lowercase после точки = неряшливо/AI-tell.
+    text = re.sub(r"([.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
     if text:
         text = text[0].upper() + text[1:]
     return text
