@@ -5171,22 +5171,31 @@ def _reddit_worthy(title, body):
         return False
     try:
         resp = anthropic.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=5,
             system=(
-                "You filter Reddit posts for a founder in the AI-assistant / Telegram-bot / productivity space who comments "
-                "with genuine value. EVERY post you pass YES he WILL comment on, no second filtering — so pass ONLY posts that "
-                "are genuinely worth a substantive on-topic reply. Answer ONE word: yes or no.\n"
-                "yes ONLY if the post clearly gives you something real to respond to: an explicit question, a request for a "
-                "recommendation, a stated problem/frustration, or a genuine opinion/discussion prompt about AI assistants, bots, "
-                "automation, productivity, or choosing an AI — where a thoughtful on-topic reply obviously fits.\n"
-                "no for EVERYTHING else, including:\n"
-                "- a joke, meme, rant, story, flex, or observation with NO real question or problem to answer (even if it's about AI).\n"
-                "- a narrow technical bug of one specific tool/bot/library, or pure coding/troubleshooting help for a dev setup.\n"
-                "- spam, ads, self-promotion ('I built/launched X'), release announcements, tutorials, showcases, tool dumps, giveaways.\n"
-                "- off-topic (not about AI assistants, bots, automation, productivity, or the everyday problems they solve).\n"
-                "If there is no clear question or problem to engage with, OR you are unsure, answer no. Dropping a borderline "
-                "post is much better than passing one that is not worth commenting on."
+                "You are a STRICT filter. A founder of a PERSONAL AI ASSISTANT product (an AI helper inside Telegram for "
+                "everyday people) will post a genuine, helpful comment on EVERY post you pass YES — no second filtering. So "
+                "pass ONLY posts that clearly deserve a substantive on-topic reply. Answer ONE word: yes or no.\n"
+                "Answer YES only if BOTH hold:\n"
+                "1) TOPIC is squarely about: choosing or comparing AI chat assistants, AI assistant bots / chatbots, personal "
+                "productivity with AI, automation of everyday tasks, AI memory/context, or the everyday problems a personal AI "
+                "assistant solves.\n"
+                "2) The post gives a real hook to respond to: an explicit question, a request for a recommendation, a stated "
+                "personal problem/frustration, or a genuine open discussion/opinion prompt — where a thoughtful reply obviously fits.\n"
+                "Answer NO (drop it) for ALL of the following, EVEN IF AI is mentioned:\n"
+                "- OFF-TOPIC niches: ecommerce / product feeds, devops / infrastructure, security research, hardware or physical "
+                "devices, crypto, dev tooling, data pipelines, low-level coding — anything NOT about personal AI assistants, "
+                "chat, or everyday productivity.\n"
+                "- SELF-PROMO / SHOWCASE: the author is presenting their OWN project, app, tool or research. Tells: 'I built', "
+                "'I made', 'I launched', \"I've been working on\", 'my app/tool/project', 'sharing my', 'looking for feedback', "
+                "'roast my', 'check out my', 'feedback welcome'. This is promotion, not a discussion prompt — ALWAYS no.\n"
+                "- NARROW PRODUCT COMPLAINT / FEATURE WISH about ONE specific third-party app or bot ('I wish App X had feature "
+                "Y', a bug in one tool/library) — too narrow, no.\n"
+                "- a joke, meme, rant, story, flex, or observation with NO real question or problem to answer.\n"
+                "- spam, ads, giveaways, release announcements, tutorials, tool dumps.\n"
+                "If the topic is off the niche, OR the author is promoting their own thing, OR you are unsure — answer no. "
+                "Dropping a borderline post is far better than passing junk."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
