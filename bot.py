@@ -5266,6 +5266,45 @@ async def cmd_rc(update, context):
         await update.message.reply_text("Не вышло сгенерить коммент, попробуй ещё раз.")
 
 
+async def cmd_xr(update, context):
+    """Генератор X-реплая: /xr <текст поста> → живой реплай (Sonnet, X best practices, без рекламы, без LLM-щины)."""
+    parts = (update.message.text or "").split(None, 1)
+    post = parts[1].strip() if len(parts) > 1 else ""
+    if not post:
+        await update.message.reply_text("Кинь так: /xr и следом текст X-поста. Верну готовый реплай.")
+        return
+    await update.message.reply_text("✍️ Пишу реплай...")
+    try:
+        resp = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=300,
+            system=(
+                "You are a real indie founder, a NON-native English speaker, replying to a post on X/Twitter. "
+                "Write ONE reply that reads as a genuine human, never AI.\n"
+                "X BEST PRACTICES (from research):\n"
+                "- Be substantive and SPECIFIC to this exact post — genuine replies that add to the conversation get "
+                "surfaced (reply quality is a ranking signal on X). No generic praise.\n"
+                "- Short and punchy, X style. One clear point or one real question back. No padding.\n"
+                "- Authentic engagement, not engagement-bait. Don't ask people to follow/like.\n"
+                "STYLE — must NOT look like AI:\n"
+                "- Plain simple English like a smart non-native. Short. Everyday words. A tiny imperfection is fine.\n"
+                "- NO em-dashes anywhere. NO LLM cliches (game-changer, honestly, that said, delve, leverage, "
+                "this., it's not just X it's Y). NO fake enthusiasm or hype.\n"
+                "- Casual. Light slang ok (tbh, imo, ngl, gonna). lowercase is fine on X.\n"
+                "- No hashtags. Emojis only if truly natural, otherwise none.\n"
+                "PROMOTION:\n"
+                "- NO advertising. Do NOT mention or promote any product/tool/VELA. Just a genuine reply.\n"
+                "Output only the reply text, nothing else."
+            ),
+            messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
+        )
+        reply = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
+    except Exception as e:
+        logger.error(f"cmd_xr failed: {e}", exc_info=True)
+        await update.message.reply_text("Не вышло сгенерить реплай, попробуй ещё раз.")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -5293,6 +5332,7 @@ def main():
     app.add_handler(CommandHandler("xradar", cmd_xradar))
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
+    app.add_handler(CommandHandler("xr", cmd_xr))
     app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
@@ -5311,7 +5351,8 @@ def main():
             BotCommand("reminders", "Активные напоминания"),
             BotCommand("xradar", "Горячие посты X по моим темам"),
             BotCommand("reddit", "Свежие треды Reddit с болью под коммент"),
-            BotCommand("rc", "Сгенерить коммент: /rc + текст боли"),
+            BotCommand("rc", "Сгенерить reddit-коммент: /rc + текст боли"),
+            BotCommand("xr", "Сгенерить X-реплай: /xr + текст поста"),
         ])
     app.post_init = post_init
 
