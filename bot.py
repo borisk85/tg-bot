@@ -5276,7 +5276,7 @@ def _strip_ai_tells(text):
         return text
     try:
         r = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-8",
             max_tokens=400,
             system=("You lightly rewrite a reddit comment so it reads more like a real human and less like AI. "
                     "Keep the meaning and the casual rough tone, lowercase is fine. Output ONLY the rewritten comment."),
@@ -5301,7 +5301,7 @@ async def _rc_generate(update, pain):
     await update.message.reply_text("✍️ Пишу коммент...")
     try:
         resp = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-8",
             max_tokens=400,
             system=(
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
@@ -5363,7 +5363,7 @@ async def _xr_generate(update, post):
     await update.message.reply_text("✍️ Пишу реплай...")
     try:
         resp = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-8",
             max_tokens=300,
             system=(
                 "You are a real indie founder, a NON-native English speaker, replying to a post on X/Twitter. "
