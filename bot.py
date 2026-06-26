@@ -5457,15 +5457,15 @@ def _downgrade_nonnative(text):
 
 
 def _target_words(thread):
-    """Детерминированный потолок длины коммента из длины/типа треда (на основе ресёрча:
-    реальные reddit-комменты короче поста и масштабируются с глубиной обсуждения).
-    Короткий вопрос → короткий ответ; развёрнутая дискуссия → до 3-4 предложений."""
+    """Детерминированный потолок длины коммента из длины треда. На основе ресёрча: реальные
+    reddit-комменты КОРОТКИЕ — медиана ~9 слов, среднее ~16, обычно 1-2 предложения. Держим
+    близко к этому: даже развёрнутая дискуссия редко требует больше 2 предложений."""
     n = len((thread or "").split())
-    if n < 40:        # короткий вопрос / простая боль
-        return 30
-    if n < 150:       # средний тред
-        return 50
-    return 70         # развёрнутый дискуссионный / технический
+    if n < 40:        # короткий вопрос / простая боль → 1 предложение
+        return 22
+    if n < 150:       # средний тред → 1-2 предложения
+        return 32
+    return 42         # развёрнутый/технический → 2 предложения, не больше
 
 
 def _enforce_short(text, max_words=70):
@@ -5540,11 +5540,11 @@ async def _rc_generate(update, pain, image_data=None):
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
                 "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
                 "REDDIT BEST PRACTICES (from research):\n"
-                "- LENGTH: keep it tight and human, but MATCH the thread. A simple question → 1-2 sentences. A real "
-                "discussion or technical thread (like this kind) → about 3-4 short sentences with one or two concrete, "
-                "specific points. Hard limits on BOTH ends: never a single throwaway line that looks dismissive on a "
-                "substantive thread, and NEVER an essay, mini-blog, or multiple paragraphs (that screams AI). Roughly 30-70 "
-                "words depending on the thread. Always ONE single block of text, never two paragraphs, no blank line.\n"
+                "- LENGTH (data-based): real reddit comments are SHORT — median ~14 words, average ~25, and 91% are under "
+                "100 words; shorter comments get more upvotes. So keep it to 1-2 sentences, about 15-35 words. A simple "
+                "question → one sentence is enough. Even a deep discussion thread rarely needs more than 2 sentences plus "
+                "maybe a short third. NEVER an essay or multiple paragraphs (that screams AI). Not a bare throwaway line "
+                "either — say one concrete, specific thing. Always ONE single block of text, no blank line.\n"
                 "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
