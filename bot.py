@@ -4664,6 +4664,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
 
+    # Двухшаговые генераторы: /rc или /xr ждут текст следующим сообщением
+    pending = context.user_data.pop("await_gen", None) if context.user_data else None
+    if pending == "rc" and user_text.strip():
+        await _rc_generate(update, user_text.strip())
+        return
+    if pending == "xr" and user_text.strip():
+        await _xr_generate(update, user_text.strip())
+        return
+
     # В группах — отвечать только на @mention или reply на сообщение бота
     chat_type = update.message.chat.type
     if chat_type in ("group", "supergroup"):
@@ -5232,12 +5241,13 @@ async def cmd_reddit(update, context):
 
 
 async def cmd_rc(update, context):
-    """Генератор reddit-коммента: /rc <текст боли/треда> → живой человеческий коммент (Sonnet, без рекламы, без LLM-щины)."""
-    parts = (update.message.text or "").split(None, 1)
-    pain = parts[1].strip() if len(parts) > 1 else ""
-    if not pain:
-        await update.message.reply_text("Кинь так: /rc и следом текст боли или треда. Я верну готовый коммент.")
-        return
+    """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда следующим сообщением."""
+    context.user_data["await_gen"] = "rc"
+    await update.message.reply_text("Кидай текст боли или треда 👇")
+
+
+async def _rc_generate(update, pain):
+    """Reddit-коммент, шаг 2: генерация по присланному тексту (Sonnet, без рекламы, без LLM-щины)."""
     await update.message.reply_text("✍️ Пишу коммент...")
     try:
         resp = anthropic.messages.create(
@@ -5277,12 +5287,13 @@ async def cmd_rc(update, context):
 
 
 async def cmd_xr(update, context):
-    """Генератор X-реплая: /xr <текст поста> → живой реплай (Sonnet, X best practices, без рекламы, без LLM-щины)."""
-    parts = (update.message.text or "").split(None, 1)
-    post = parts[1].strip() if len(parts) > 1 else ""
-    if not post:
-        await update.message.reply_text("Кинь так: /xr и следом текст X-поста. Верну готовый реплай.")
-        return
+    """X-реплай, шаг 1: /xr → ждём текст поста следующим сообщением."""
+    context.user_data["await_gen"] = "xr"
+    await update.message.reply_text("Кидай текст X-поста 👇")
+
+
+async def _xr_generate(update, post):
+    """X-реплай, шаг 2: генерация по присланному тексту (Sonnet, X best practices)."""
     await update.message.reply_text("✍️ Пишу реплай...")
     try:
         resp = anthropic.messages.create(
