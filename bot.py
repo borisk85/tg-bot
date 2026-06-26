@@ -4664,8 +4664,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
 
-    # Двухшаговые генераторы: /rc или /xr ждут текст и/или ФОТО следующим сообщением
-    pending = context.user_data.pop("await_gen", None) if context.user_data else None
+    # Двухшаговые генераторы: /rc или /xr ждут текст и/или ФОТО следующим сообщением.
+    # Состояние в Redis (переживает перезапуск бота при деплое), не в памяти процесса.
+    pending = _get_await(user_id)
+    _clear_await(user_id)
     if pending in ("rc", "xr"):
         gen_img = None
         if update.message.photo:  # только фото, видео не поддерживается
@@ -4680,18 +4682,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gen_text = (update.message.text or update.message.caption or "").strip()
         # фото без текста → копим фото, ждём текст отдельным сообщением (caption в TG ограничен ~1024 симв.)
         if gen_img and not gen_text:
-            context.user_data["gen_img"] = gen_img
-            context.user_data["await_gen"] = pending
+            _set_genimg(user_id, gen_img)
+            _set_await(user_id, pending)
             await update.message.reply_text("Фото принял. Теперь кинь текст треда отдельным сообщением")
             return
         # текст пришёл — подхватываем ранее присланное фото (если было)
         if gen_text and not gen_img:
-            gen_img = context.user_data.pop("gen_img", None)
+            gen_img = _get_genimg(user_id)
+            _clear_genimg(user_id)
         if not gen_text and not gen_img:
-            context.user_data["await_gen"] = pending
+            _set_await(user_id, pending)
             await update.message.reply_text("Кинь текст треда или фото")
             return
-        context.user_data.pop("gen_img", None)
+        _clear_genimg(user_id)
         if pending == "rc":
             await _rc_generate(update, gen_text, gen_img)
         else:
@@ -5304,6 +5307,54 @@ BORIS_PROFILE = (
 )
 
 
+# Состояние двухшаговых генераторов /rc /xr — в Redis (с TTL), а НЕ в памяти процесса:
+# иначе перезапуск бота (деплой) теряет «жду текст треда», и текст уходит в обычный чат-режим.
+_mem_await = {}
+_mem_genimg = {}
+_AWAIT_TTL = 1800  # 30 мин
+
+
+def _set_await(uid, val):
+    if redis_client:
+        redis_client.setex(f"await_gen:{uid}", _AWAIT_TTL, val)
+    else:
+        _mem_await[uid] = val
+
+
+def _get_await(uid):
+    if redis_client:
+        return redis_client.get(f"await_gen:{uid}")
+    return _mem_await.get(uid)
+
+
+def _clear_await(uid):
+    if redis_client:
+        redis_client.delete(f"await_gen:{uid}")
+    else:
+        _mem_await.pop(uid, None)
+
+
+def _set_genimg(uid, val):
+    if redis_client:
+        redis_client.setex(f"gen_img:{uid}", _AWAIT_TTL, json.dumps(val))
+    else:
+        _mem_genimg[uid] = val
+
+
+def _get_genimg(uid):
+    if redis_client:
+        d = redis_client.get(f"gen_img:{uid}")
+        return json.loads(d) if d else None
+    return _mem_genimg.get(uid)
+
+
+def _clear_genimg(uid):
+    if redis_client:
+        redis_client.delete(f"gen_img:{uid}")
+    else:
+        _mem_genimg.pop(uid, None)
+
+
 def _tidy(text):
     """Механическая финальная чистка: схлопнуть абзацы в ОДИН блок (промпт это требует,
     но модель иногда разбивает) и вырезать слово-маркер 'honestly' (LLM-клише, фильтр
@@ -5455,7 +5506,7 @@ def _describe_image(image_data):
 
 async def cmd_rc(update, context):
     """Reddit-коммент, шаг 1: /rc → ждём текст боли/треда (и/или фото) следующим сообщением."""
-    context.user_data["await_gen"] = "rc"
+    _set_await(update.effective_user.id, "rc")
     await update.message.reply_text("Кидай текст треда (можно с фото)")
 
 
@@ -5541,7 +5592,7 @@ async def _rc_generate(update, pain, image_data=None):
 
 async def cmd_xr(update, context):
     """X-реплай, шаг 1: /xr → ждём текст поста следующим сообщением."""
-    context.user_data["await_gen"] = "xr"
+    _set_await(update.effective_user.id, "xr")
     await update.message.reply_text("Кидай текст X-поста")
 
 
