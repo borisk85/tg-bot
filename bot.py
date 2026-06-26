@@ -5019,7 +5019,7 @@ def _xradar_worthy(text: str) -> bool:
 
 async def cmd_xradar(update, context):
     """X-радар: ищет свежие горячие посты по моим темам, отдает топ со ссылками для реплаев."""
-    await update.message.reply_text("🔭 Сканирую X по твоим темам, 20-40 сек...")
+    await update.message.reply_text("Сканирую X по твоим темам, 20-40 сек...")
     api_key = os.getenv("TWITTERAPI_KEY")
     if not api_key:
         await update.message.reply_text("Не задан TWITTERAPI_KEY в .env.")
@@ -5061,7 +5061,7 @@ async def cmd_xradar(update, context):
             posts.append(tw)
     if not posts:
         await update.message.reply_text(
-            "🔭 По твоим темам за 2 дня горячего без спама не нашлось. Загляни позже."
+            "По твоим темам за 2 дня горячего без спама не нашлось. Загляни позже."
         )
         return
 
@@ -5072,12 +5072,12 @@ async def cmd_xradar(update, context):
     # фильтр качества: топ-40 по engagement прогоняем через классификатор, оставляем только пригодные под реплай
     candidates = posts[:40]
     await update.message.reply_text(
-        f"🔭 Нашёл {len(posts)} постов, отсеиваю мусор (приманки, реклама, листиклы, флекс)..."
+        f"Нашёл {len(posts)} постов, отсеиваю мусор..."
     )
     worthy = [tw for tw in candidates if _xradar_worthy(tw.get("text") or "")]
     if not worthy:
         await update.message.reply_text(
-            "🔭 Горячее по темам есть, но всё мусор — приманки, реклама, листиклы. Под реплай ничего годного, загляни позже."
+            "Горячее по темам есть, но всё мусор. Под реплай ничего годного, загляни позже."
         )
         return
     top = worthy[:15]
@@ -5088,7 +5088,7 @@ async def cmd_xradar(update, context):
             except Exception:
                 pass
     header = (
-        f"🔭 X-радар — {len(top)} постов ПОД РЕПЛАЙ (из {len(posts)} сырых, мусор отфильтрован).\n"
+        f"X-радар — {len(top)} постов ПОД РЕПЛАЙ (из {len(posts)} сырых, мусор отфильтрован).\n"
         f"Тапни ссылку → ответь прямо в X.\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
