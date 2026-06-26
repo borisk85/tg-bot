@@ -4678,10 +4678,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.warning(f"await_gen photo download failed: {e}")
         gen_text = (update.message.text or update.message.caption or "").strip()
+        # фото без текста → копим фото, ждём текст отдельным сообщением (caption в TG ограничен ~1024 симв.)
+        if gen_img and not gen_text:
+            context.user_data["gen_img"] = gen_img
+            context.user_data["await_gen"] = pending
+            await update.message.reply_text("Фото принял. Теперь кинь текст треда отдельным сообщением 👇")
+            return
+        # текст пришёл — подхватываем ранее присланное фото (если было)
+        if gen_text and not gen_img:
+            gen_img = context.user_data.pop("gen_img", None)
         if not gen_text and not gen_img:
-            context.user_data["await_gen"] = pending  # ничего не пришло — ждём дальше
+            context.user_data["await_gen"] = pending
             await update.message.reply_text("Кинь текст треда или фото 👇")
             return
+        context.user_data.pop("gen_img", None)
         if pending == "rc":
             await _rc_generate(update, gen_text, gen_img)
         else:
