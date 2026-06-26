@@ -5387,7 +5387,8 @@ def _strip_ai_tells(text):
             model="claude-sonnet-4-6",
             max_tokens=400,
             system=("You lightly rewrite a reddit comment so it reads more like a real human and less like AI. "
-                    "Keep the meaning and the casual rough tone. Output ONLY the rewritten comment."),
+                    "Keep the meaning and the casual rough tone. If the comment mentions a product name or a URL "
+                    "(e.g. velabot.io), you MUST keep it exactly — never drop it. Output ONLY the rewritten comment."),
             messages=[{"role": "user", "content": "Rewrite this comment, removing: " + "; ".join(tells) +
                        ".\n\nComment:\n" + text}],
         )
@@ -5444,6 +5445,8 @@ def _downgrade_nonnative(text):
                 "teach the reader a lesson.\n"
                 "- Keep it casual and a little rough. Vary sentence length, mix short and long. NO em-dashes. Same length "
                 "or shorter, never longer.\n"
+                "- If the comment mentions a product name or a URL (e.g. velabot.io), you MUST keep it exactly as is — never "
+                "drop or alter it.\n"
                 "- Output ONLY the rewritten comment, nothing else."
             ),
             messages=[{"role": "user", "content": text}],
@@ -5483,8 +5486,9 @@ def _enforce_short(text, max_words=70):
                 f"You trim a too-long reddit comment down to about {target} words max (roughly 2-4 short sentences), keeping "
                 "the one or two most useful concrete points and the author's stance. Do NOT cut it to a single line — keep it "
                 "substantive, just not an essay. Keep the casual B1-B2 non-native voice and any small grammar mistakes — do "
-                "NOT polish into fluent native English, do NOT add new ideas. One single block, no line breaks, no em-dashes, "
-                "no 'honestly'. Output ONLY the trimmed comment."
+                "NOT polish into fluent native English, do NOT add new ideas. If the comment mentions a product name or a "
+                "URL (e.g. velabot.io), you MUST keep it — never drop it when trimming. One single block, no line breaks, "
+                "no em-dashes, no 'honestly'. Output ONLY the trimmed comment."
             ),
             messages=[{"role": "user", "content": text}],
         )
