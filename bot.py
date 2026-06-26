@@ -5304,6 +5304,22 @@ BORIS_PROFILE = (
 )
 
 
+def _tidy(text):
+    """Механическая финальная чистка: схлопнуть абзацы в ОДИН блок (промпт это требует,
+    но модель иногда разбивает) и вырезать слово-маркер 'honestly' (LLM-клише, фильтр
+    рерайта его не ловит). Дёшево, без вызова модели."""
+    if not text:
+        return text
+    text = re.sub(r"\s*\n\s*\n+\s*", " ", text)          # абзацы → один блок
+    text = re.sub(r"\n+", " ", text)                       # любые переносы → пробел
+    text = re.sub(r"(?i)\bhonestly\b[ ,]*", "", text)     # убрать honestly
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    # после удаления слова в начале предложения — поднять первую букву
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
+
+
 def _strip_ai_tells(text):
     """Механическая самопроверка готового коммента на твёрдые ИИ-маркеры. Найдено → переписываем."""
     if not text:
@@ -5389,6 +5405,32 @@ def _downgrade_nonnative(text):
         return text
 
 
+def _enforce_short(text, max_words=45):
+    """Механический потолок длины. Opus игнорит текстовый лимит в промпте и пишет эссе —
+    если коммент длиннее max_words, Sonnet сжимает его до 1-2 коротких предложений,
+    сохраняя смысл, позицию и не-нейтивный B1-B2 стиль. Не зависит от послушания Opus."""
+    if not text or len(text.split()) <= max_words:
+        return text
+    try:
+        r = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=200,
+            system=(
+                "You shorten a reddit comment HARD. Cut it to at most 2 short sentences, about 30-40 words max, keeping the "
+                "single most useful point and the author's stance. Keep the casual B1-B2 non-native voice and any small "
+                "grammar mistakes — do NOT polish into fluent native English, do NOT add words. One single block, no line "
+                "breaks, no em-dashes, no 'honestly'. Output ONLY the shortened comment."
+            ),
+            messages=[{"role": "user", "content": text}],
+        )
+        out = "".join(b.text for b in r.content if hasattr(b, "text")).strip()
+        out = re.sub(r"\bi\b", "I", out)
+        return out or text
+    except Exception as e:
+        logger.warning(f"_enforce_short failed: {e}")
+        return text
+
+
 def _describe_image(image_data):
     """Анализ фото из треда — Sonnet (дешевле Opus), отдаёт короткое текстовое описание для генератора."""
     if not image_data:
@@ -5433,10 +5475,11 @@ async def _rc_generate(update, pain, image_data=None):
                 "You are a real indie founder, a NON-native English speaker, replying in a Reddit thread where someone "
                 "describes a problem or frustration. Write ONE reply that reads as a genuine human, never AI.\n"
                 "REDDIT BEST PRACTICES (from research):\n"
-                "- LENGTH: match the thread, do not force a fixed number. Research on real reddit comments shows median ~9 "
-                "words and average ~16 — most are very short, a line or two. So default to short and to the point. A genuinely "
-                "complex or technical thread can run longer, up to ~4-5 sentences, if it really needs the depth. Don't pad a "
-                "simple thread, don't cut a complex one. Always ONE single block of text — never two paragraphs, no blank line.\n"
+                "- LENGTH (critical, keep it SHORT): research on real reddit comments shows median ~9 words and average ~16 "
+                "— most are a single line or two. Target roughly 15-40 words. Even a genuinely complex thread must stay tight: "
+                "AT MOST 2-3 short sentences, never more. NEVER write an essay, a mini-blog, or multiple paragraphs — a long "
+                "comment is the #1 thing to avoid here, it reads as AI and nobody reads it. Always ONE single block of text, "
+                "never two paragraphs, no blank line. When in doubt, cut it shorter.\n"
                 "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
@@ -5487,6 +5530,8 @@ async def _rc_generate(update, pain, image_data=None):
         comment = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         comment = _downgrade_nonnative(comment)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
+        comment = _enforce_short(comment)   # механический потолок длины (Opus игнорит лимит в промпте)
+        comment = _tidy(comment)   # один блок + убрать honestly
         comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
     except Exception as e:
@@ -5553,6 +5598,8 @@ async def _xr_generate(update, post, image_data=None):
         reply = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
         reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
         reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
+        reply = _enforce_short(reply)   # механический потолок длины (Opus игнорит лимит в промпте)
+        reply = _tidy(reply)   # один блок + убрать honestly
         reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
     except Exception as e:
