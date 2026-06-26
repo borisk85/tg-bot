@@ -5322,6 +5322,43 @@ def _strip_ai_tells(text):
         return text
 
 
+def _downgrade_nonnative(text):
+    """Принудительно роняет английский коммента до уровня B1-B2 не-нейтива и срезает менторский тон.
+    Opus упорно пишет гладко/нативно с поучающими конструкциями — этот слой ломает идиомы, добавляет
+    реальные ошибки артиклей/предлогов, убирает лекторский тон. Смысл и позицию сохраняет."""
+    if not text:
+        return text
+    try:
+        r = anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            system=(
+                "You rewrite an English comment so it reads like it was typed by a B1-B2 non-native speaker (a Russian/"
+                "Kazakh indie founder), NOT a fluent native and NOT an influencer. Keep the EXACT meaning, opinion and "
+                "stance — do not change what the person thinks. Rules:\n"
+                "- Replace fluent/idiomatic native phrasing with plain simple words. Kill native idioms (e.g. 'prompt the "
+                "whole flow into existence', 'what tone each reminder hits', 'handing over the decisions') and say it in "
+                "simple plain words a non-native would use.\n"
+                "- Introduce 2-4 REAL non-native mistakes spread across the text: drop or misuse an article (a/the), use a "
+                "slightly off preposition, sometimes a small word-order slip. Not more than that. Keep 'I' capitalized and "
+                "normal sentence capitalization.\n"
+                "- REMOVE any preachy / mentor / life-lesson tone. Cut lines that lecture the reader ('The mistake is "
+                "people think...', 'You still own the experience...'). A real person just states his own case, he does not "
+                "teach the reader a lesson.\n"
+                "- Keep it casual and a little rough. Vary sentence length, mix short and long. NO em-dashes. Same length "
+                "or shorter, never longer.\n"
+                "- Output ONLY the rewritten comment, nothing else."
+            ),
+            messages=[{"role": "user", "content": text}],
+        )
+        out = "".join(b.text for b in r.content if hasattr(b, "text")).strip()
+        out = re.sub(r"\bi\b", "I", out)
+        return out or text
+    except Exception as e:
+        logger.warning(f"_downgrade_nonnative failed: {e}")
+        return text
+
+
 def _describe_image(image_data):
     """Анализ фото из треда — Sonnet (дешевле Opus), отдаёт короткое текстовое описание для генератора."""
     if not image_data:
@@ -5413,8 +5450,9 @@ async def _rc_generate(update, pain, image_data=None):
             messages=[{"role": "user", "content": f"Thread / pain:\n{pain[:2500]}"}],
         )
         comment = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
+        comment = _downgrade_nonnative(comment)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
         comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
-        comment = _strip_ai_tells(comment)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
     except Exception as e:
         logger.error(f"cmd_rc failed: {e}", exc_info=True)
@@ -5473,8 +5511,9 @@ async def _xr_generate(update, post, image_data=None):
             messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
         )
         reply = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+        reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
+        reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
         reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
-        reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры
         await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
     except Exception as e:
         logger.error(f"cmd_xr failed: {e}", exc_info=True)
