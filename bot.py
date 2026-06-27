@@ -4323,6 +4323,7 @@ _MENU_CMDS_RU = [
     ("xradar", "Горячие посты X по моим темам"),
     ("reddit", "Свежие треды Reddit с болью под коммент"),
     ("rc", "Reddit-коммент по треду (текст + фото)"),
+    ("rp", "Reddit-пост по твоему драфту"),
     ("xr", "X-реплай по посту (текст + фото)"),
     ("en", "Меню на английском"),
     ("ru", "Меню на русском"),
@@ -4338,6 +4339,7 @@ _MENU_CMDS_EN = [
     ("xradar", "Hot X posts on my topics"),
     ("reddit", "Fresh Reddit threads with pain to comment on"),
     ("rc", "Reddit comment by thread (text + photo)"),
+    ("rp", "Reddit post from your draft"),
     ("xr", "X reply by post (text + photo)"),
     ("en", "Switch menu to English"),
     ("ru", "Switch menu to Russian"),
@@ -4804,7 +4806,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Состояние в Redis (переживает перезапуск бота при деплое), не в памяти процесса.
     pending = _get_await(user_id)
     _clear_await(user_id)
-    if pending in ("rc", "xr"):
+    if pending in ("rc", "xr", "rp"):
         gen_img = None
         if update.message.photo:  # только фото, видео не поддерживается
             try:
@@ -4833,8 +4835,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _clear_genimg(user_id)
         if pending == "rc":
             await _rc_generate(update, gen_text, gen_img)
-        else:
+        elif pending == "xr":
             await _xr_generate(update, gen_text, gen_img)
+        else:
+            await _rp_generate(update, gen_text, gen_img)
         return
 
     # В группах — отвечать только на @mention или reply на сообщение бота
@@ -5798,6 +5802,73 @@ async def _rc_generate(update, pain, image_data=None):
         await update.message.reply_text("Не вышло сгенерить коммент, попробуй ещё раз.")
 
 
+async def cmd_rp(update, context):
+    """Reddit-пост, шаг 1: /rp → ждём тему/драфт (и/или фото) следующим сообщением."""
+    _set_await(update.effective_user.id, "rp")
+    await update.message.reply_text(
+        "Кидай тему и материал для поста: о чем хочешь рассказать, твои мысли/драфт (можно с фото). "
+        "Бот напишет пост по твоему материалу, ты правишь."
+    )
+
+
+async def _rp_generate(update, brief, image_data=None):
+    """Reddit-пост, шаг 2: драфт/тема Boris → Opus anchor-пост ПО ЕГО материалу. Без рекламы, без LLM-щины."""
+    await update.message.reply_text("Пишу пост...")
+    try:
+        if image_data:
+            _d = _describe_image(image_data)
+            if _d:
+                brief = (brief + "\n\n[Image attached, described]: " + _d).strip()
+        resp = anthropic.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=2000,
+            tools=[_WEB_SEARCH_TOOL],
+            system=(
+                "You are a real indie founder, a NON-native English speaker, writing a standalone Reddit POST (a selftext "
+                "post for a niche subreddit) based on Boris's own draft/material. This is an ANCHOR post: a high-value "
+                "standalone piece (a teardown, a how-I-did-it story, a checklist, a benchmark, a decision framework), NOT a "
+                "product ad.\n"
+                "FOLLOW BORIS'S DRAFT: the user message is Boris's draft, written FREELY IN RUSSIAN (loose notes/theses). "
+                "Understand it and write the post in ENGLISH. Build the post on HIS angle, HIS points, HIS facts. Keep EVERY "
+                "specific detail he gives (numbers, names, the exact angle). Do NOT invent a different topic and do NOT add "
+                "claims he didn't make.\n"
+                "HOW BORIS CONTROLS LENGTH, BLOCKS AND MAIN POINTS (critical): each key point in his draft becomes its own "
+                "paragraph/block in the post, in HIS order. Keep ALL his points, add none of your own. The post length and "
+                "number of blocks FOLLOW the draft: a short draft with few points → a short post; more points → more blocks. "
+                "Do not pad beyond what he gave. You shape and structure it; the substance and the point list are his. Boris "
+                "edits the result afterwards, so stay close to his draft.\n"
+                "REDDIT POST BEST PRACTICES (research):\n"
+                "- Selftext post: a catchy TITLE on the first line, then a structured body. Short paragraphs. An optional ## "
+                "subheading or a short list ONLY where it genuinely helps scanning.\n"
+                "- Be the OPERATOR, not the tool: share what you actually did and learned. Operators are welcome, ads are not.\n"
+                "- Length: a real anchor post, roughly 150-400 words. Value, not a wall of text.\n"
+                "- Open with a concrete hook (a result, a number, a problem), not a greeting.\n"
+                "- Honest trade-offs read credible.\n"
+                "STYLE — must NOT look like AI (top priority):\n"
+                "- Non-native B1-B2: let a few real mistakes slip in (wrong/missing articles, off prepositions, slightly off "
+                "word order). Normal sentence capitalization, 'I' capitalized. Not flawless, do not over-polish.\n"
+                "- Vary sentence length, write in bursts, never an even flat rhythm.\n"
+                "- NO em-dashes anywhere. NO LLM cliches (game-changer, honestly, that said, delve, leverage, moreover, "
+                "furthermore, best of both, it's not just X it's Y). NO marketing words (revolutionary, seamless, powerful, "
+                "best solution). No emojis, no hashtags.\n"
+                "- NO tidy list of three.\n"
+                + BORIS_PROFILE +
+                "\nFACT CHECK: for any concrete external fact (a price, a limit, a model name/version, a date, a tool's "
+                "capability), use web_search to verify before writing. Never narrate your searching, never dump citations.\n"
+                "OUTPUT: the TITLE on the first line, then a blank line, then the body in markdown. Nothing else: no meta, no "
+                "'here is your post', no draft-then-correction."
+            ),
+            messages=[{"role": "user", "content": f"Boris's draft (free-form, in Russian) for the post:\n{brief[:3000]}"}],
+        )
+        post = _final_text_after_search(resp)
+        post = _strip_ai_tells(post)
+        post = re.sub(r"\bi\b", "I", post)
+        await update.message.reply_text(post or "Пусто, попробуй ещё раз с темой/драфтом.")
+    except Exception as e:
+        logger.error(f"cmd_rp failed: {e}", exc_info=True)
+        await update.message.reply_text("Не вышло сгенерить пост, попробуй ещё раз.")
+
+
 async def cmd_xr(update, context):
     """X-реплай, шаг 1: /xr → ждём текст поста следующим сообщением."""
     _set_await(update.effective_user.id, "xr")
@@ -5903,6 +5974,7 @@ def main():
     app.add_handler(CommandHandler("xradar", cmd_xradar))
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
+    app.add_handler(CommandHandler("rp", cmd_rp))
     app.add_handler(CommandHandler("xr", cmd_xr))
     app.add_handler(CommandHandler("en", cmd_en))
     app.add_handler(CommandHandler("ru", cmd_ru))
