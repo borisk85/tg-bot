@@ -5026,7 +5026,7 @@ async def cmd_xradar(update, context):
         return
     import time as _t
     since = int(_t.time()) - 2 * 86400  # последние 2 дня
-    seen, posts = set(), []
+    seen, posts, raw_total = set(), [], 0
     for q in X_RADAR_QUERIES:
         query = f'{q} lang:en since_time:{since}'  # min_faves уже внутри каждого запроса
         try:
@@ -5037,6 +5037,7 @@ async def cmd_xradar(update, context):
                 timeout=25,
             )
             tweets = resp.json().get("tweets", []) or []
+            raw_total += len(tweets)
         except Exception as e:
             logger.warning(f"xradar query failed [{q}]: {e}")
             continue
@@ -5059,6 +5060,8 @@ async def cmd_xradar(update, context):
                     pass
             seen.add(tid)
             posts.append(tw)
+    logger.info(f"xradar: API вернул {raw_total} сырых твитов по {len(X_RADAR_QUERIES)} запросам, "
+                f"{len(posts)} осталось после фильтров/дедупа")
     if not posts:
         await update.message.reply_text(
             "По твоим темам за 2 дня горячего без спама не нашлось. Загляни позже."
