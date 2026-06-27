@@ -4177,60 +4177,192 @@ def authorized(func):
         return await func(update, context)
     return wrapper
 
+START_RU = (
+    "Привет! Вот, что я умею:\n\n"
+    "📅 Google Calendar\n"
+    "— создать, посмотреть, удалить события\n\n"
+    "📋 Google Tasks\n"
+    "— создать, посмотреть, удалить задачи\n\n"
+    "📧 Gmail\n"
+    "— поиск, чтение, отправка, удаление, корзина, спам, отписка\n\n"
+    "🗂 Google Drive\n"
+    "— поиск, чтение, создание документов, таблиц, папок\n\n"
+    "📝 Notion\n"
+    "— поиск, чтение, создание страниц и записей в базах данных\n\n"
+    "⏰ Напоминания\n"
+    "— напомнить о чем-либо в нужное время\n\n"
+    "🔔 Ценовые уведомления\n"
+    "— напомнить, когда нужный актив достигнет определенной цены\n\n"
+    "💱 Криптовалюты и валюты\n"
+    "— курс любой криптовалюты или фиатной пары\n\n"
+    "🌤 Погода\n"
+    "— сейчас и прогноз до 5 дней\n\n"
+    "📖 Чтение сайтов\n"
+    "— открыть ссылку и пересказать содержимое\n\n"
+    "📡 Telegram-каналы\n"
+    "— читать посты из каналов за любой период и резюмировать\n\n"
+    "📸 Анализ фото\n"
+    "— описать и ответить на вопросы по фото\n\n"
+    "🍽 Анализ калорий по фото\n"
+    "— подсчет ккал по фото еды или блюда\n\n"
+    "✈️ Поиск авиабилетов\n"
+    "— цены на рейсы в нужные даты по всему миру\n\n"
+    "🗺 Путеводитель\n"
+    "— любые места по всему миру с рейтингом\n\n"
+    "🧠 Долгосрочная память\n"
+    "— запомню важные факты о тебе\n\n"
+    "🌅 Утренний дайджест\n"
+    "— погода, курсы активов, напоминания и задачи на день\n\n"
+    "📰 Конкурентный радар\n"
+    "— обзор рынка конкурентов в заданное время\n\n"
+    "📄 Документы\n"
+    "— анализировать файлы и отвечать на вопросы по содержимому\n\n"
+    "📊 Акции, индексы, драгметаллы и сырье\n"
+    "— актуальные цены на все виды активов\n\n"
+    "🔍 Поиск в интернете\n"
+    "— актуальная информация из сети\n\n"
+    "🎨 Генерация изображений\n"
+    "— создание изображений по описанию\n\n"
+    "🔭 X-радар\n"
+    "— горячие посты X по нужным темам под реплай, генерация реплая\n\n"
+    "🧲 Reddit-радар\n"
+    "— свежие треды Reddit с болью под коммент, генерация коммента"
+)
+
+START_EN = (
+    "Hi! Here's what I can do:\n\n"
+    "📅 Google Calendar\n"
+    "— create, view, delete events\n\n"
+    "📋 Google Tasks\n"
+    "— create, view, delete tasks\n\n"
+    "📧 Gmail\n"
+    "— search, read, send, delete, trash, spam, unsubscribe\n\n"
+    "🗂 Google Drive\n"
+    "— search, read, create docs, sheets, folders\n\n"
+    "📝 Notion\n"
+    "— search, read, create pages and database entries\n\n"
+    "⏰ Reminders\n"
+    "— remind you of anything at the right time\n\n"
+    "🔔 Price alerts\n"
+    "— notify you when an asset hits a target price\n\n"
+    "💱 Crypto and currencies\n"
+    "— rate of any crypto or fiat pair\n\n"
+    "🌤 Weather\n"
+    "— current and up to a 5-day forecast\n\n"
+    "📖 Reading websites\n"
+    "— open a link and summarize the content\n\n"
+    "📡 Telegram channels\n"
+    "— read channel posts for any period and summarize\n\n"
+    "📸 Photo analysis\n"
+    "— describe and answer questions about a photo\n\n"
+    "🍽 Calorie analysis by photo\n"
+    "— estimate kcal from a photo of food or a dish\n\n"
+    "✈️ Flight search\n"
+    "— flight prices for your dates worldwide\n\n"
+    "🗺 Guide\n"
+    "— any places worldwide with ratings\n\n"
+    "🧠 Long-term memory\n"
+    "— I'll remember important facts about you\n\n"
+    "🌅 Morning digest\n"
+    "— weather, asset rates, reminders and tasks for the day\n\n"
+    "📰 Competitor radar\n"
+    "— market overview of competitors at a set time\n\n"
+    "📄 Documents\n"
+    "— analyze files and answer questions about the content\n\n"
+    "📊 Stocks, indices, precious metals and commodities\n"
+    "— live prices for all asset types\n\n"
+    "🔍 Web search\n"
+    "— up-to-date info from the internet\n\n"
+    "🎨 Image generation\n"
+    "— create images from a description\n\n"
+    "🔭 X radar\n"
+    "— hot X posts on the right topics to reply to, reply generation\n\n"
+    "🧲 Reddit radar\n"
+    "— fresh Reddit threads with pain to comment on, comment generation"
+)
+
+
+def _menu_lang(uid):
+    if redis_client:
+        try:
+            return redis_client.get(f"menu_lang:{uid}") or "ru"
+        except Exception:
+            return "ru"
+    return _mem_menu_lang.get(uid, "ru")
+
+
+def _set_menu_lang(uid, lang):
+    if redis_client:
+        try:
+            redis_client.set(f"menu_lang:{uid}", lang)
+            return
+        except Exception:
+            pass
+    _mem_menu_lang[uid] = lang
+
+
+_mem_menu_lang = {}
+
+
 @authorized
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
-    await update.message.reply_text(
-        "Привет! Вот, что я умею:\n\n"
-        "📅 Google Calendar\n"
-        "— создать, посмотреть, удалить события\n\n"
-        "📋 Google Tasks\n"
-        "— создать, посмотреть, удалить задачи\n\n"
-        "📧 Gmail\n"
-        "— поиск, чтение, отправка, удаление, корзина, спам, отписка\n\n"
-        "🗂 Google Drive\n"
-        "— поиск, чтение, создание документов, таблиц, папок\n\n"
-        "📝 Notion\n"
-        "— поиск, чтение, создание страниц и записей в базах данных\n\n"
-        "⏰ Напоминания\n"
-        "— напомнить о чем-либо в нужное время\n\n"
-        "🔔 Ценовые уведомления\n"
-        "— напомнить, когда нужный актив достигнет определенной цены\n\n"
-        "💱 Криптовалюты и валюты\n"
-        "— курс любой криптовалюты или фиатной пары\n\n"
-        "🌤 Погода\n"
-        "— сейчас и прогноз до 5 дней\n\n"
-        "📖 Чтение сайтов\n"
-        "— открыть ссылку и пересказать содержимое\n\n"
-        "📡 Telegram-каналы\n"
-        "— читать посты из каналов за любой период и резюмировать\n\n"
-        "📸 Анализ фото\n"
-        "— описать и ответить на вопросы по фото\n\n"
-        "🍽 Анализ калорий по фото\n"
-        "— подсчет ккал по фото еды или блюда\n\n"
-        "✈️ Поиск авиабилетов\n"
-        "— цены на рейсы в нужные даты по всему миру\n\n"
-        "🗺 Путеводитель\n"
-        "— любые места по всему миру с рейтингом\n\n"
-        "🧠 Долгосрочная память\n"
-        "— запомню важные факты о тебе\n\n"
-        "🌅 Утренний дайджест\n"
-        "— погода, курсы активов, напоминания и задачи на день\n\n"
-        "📰 Конкурентный радар\n"
-        "— обзор рынка конкурентов в заданное время\n\n"
-        "📄 Документы\n"
-        "— анализировать файлы и отвечать на вопросы по содержимому\n\n"
-        "📊 Акции, индексы, драгметаллы и сырье\n"
-        "— актуальные цены на все виды активов\n\n"
-        "🔍 Поиск в интернете\n"
-        "— актуальная информация из сети\n\n"
-        "🎨 Генерация изображений\n"
-        "— создание изображений по описанию\n\n"
-        "🔭 X-радар\n"
-        "— горячие посты X по нужным темам под реплай, генерация реплая\n\n"
-        "🧲 Reddit-радар\n"
-        "— свежие треды Reddit с болью под коммент, генерация коммента"
-    )
+    lang = _menu_lang(update.effective_user.id)
+    await update.message.reply_text(START_EN if lang == "en" else START_RU)
+
+
+# Команды в меню Telegram на двух языках (свич для постов/видео на англ; чат всегда рус)
+_MENU_CMDS_RU = [
+    ("start", "Начать"),
+    ("clear", "Очистить историю чата"),
+    ("myid", "Мой Telegram ID"),
+    ("timezone", "Часовой пояс"),
+    ("memory", "Что бот знает обо мне"),
+    ("about", "Рассказать о себе"),
+    ("reminders", "Активные напоминания"),
+    ("xradar", "Горячие посты X по моим темам"),
+    ("reddit", "Свежие треды Reddit с болью под коммент"),
+    ("rc", "Reddit-коммент по треду (текст + фото)"),
+    ("xr", "X-реплай по посту (текст + фото)"),
+    ("en", "Меню на английском"),
+    ("ru", "Меню на русском"),
+]
+_MENU_CMDS_EN = [
+    ("start", "Start"),
+    ("clear", "Clear chat history"),
+    ("myid", "My Telegram ID"),
+    ("timezone", "Time zone"),
+    ("memory", "What the bot knows about me"),
+    ("about", "Tell about yourself"),
+    ("reminders", "Active reminders"),
+    ("xradar", "Hot X posts on my topics"),
+    ("reddit", "Fresh Reddit threads with pain to comment on"),
+    ("rc", "Reddit comment by thread (text + photo)"),
+    ("xr", "X reply by post (text + photo)"),
+    ("en", "Switch menu to English"),
+    ("ru", "Switch menu to Russian"),
+]
+
+
+async def _apply_menu(context, chat_id, lang):
+    from telegram import BotCommand, BotCommandScopeChat
+    pairs = _MENU_CMDS_EN if lang == "en" else _MENU_CMDS_RU
+    cmds = [BotCommand(c, d) for c, d in pairs]
+    await context.bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id))
+
+
+@authorized
+async def cmd_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _set_menu_lang(update.effective_user.id, "en")
+    await _apply_menu(context, update.effective_chat.id, "en")
+    await update.message.reply_text("Menu and /start switched to English. Use /ru to switch back.")
+
+
+@authorized
+async def cmd_ru(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _set_menu_lang(update.effective_user.id, "ru")
+    await _apply_menu(context, update.effective_chat.id, "ru")
+    await update.message.reply_text("Меню и /start снова на русском.")
 
 @authorized
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5772,27 +5904,17 @@ def main():
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
     app.add_handler(CommandHandler("xr", cmd_xr))
+    app.add_handler(CommandHandler("en", cmd_en))
+    app.add_handler(CommandHandler("ru", cmd_ru))
     app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
-    # Регистрируем команды в меню Telegram
+    # Дефолтное меню Telegram — русское (свич на англ через /en, обратно /ru)
     from telegram import BotCommand
     async def post_init(application):
-        await application.bot.set_my_commands([
-            BotCommand("start", "Начать"),
-            BotCommand("clear", "Очистить историю чата"),
-            BotCommand("myid", "Мой Telegram ID"),
-            BotCommand("timezone", "Часовой пояс"),
-            BotCommand("memory", "Что бот знает обо мне"),
-            BotCommand("about", "Рассказать о себе"),
-            BotCommand("reminders", "Активные напоминания"),
-            BotCommand("xradar", "Горячие посты X по моим темам"),
-            BotCommand("reddit", "Свежие треды Reddit с болью под коммент"),
-            BotCommand("rc", "Reddit-коммент по треду (текст + фото)"),
-            BotCommand("xr", "X-реплай по посту (текст + фото)"),
-        ])
+        await application.bot.set_my_commands([BotCommand(c, d) for c, d in _MENU_CMDS_RU])
     app.post_init = post_init
 
     logger.info("Бот запущен!")
