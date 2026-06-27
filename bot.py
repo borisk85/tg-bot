@@ -5077,7 +5077,14 @@ async def cmd_xradar(update, context):
     await update.message.reply_text(
         f"Нашёл {len(posts)} постов, отсеиваю мусор..."
     )
-    worthy = [tw for tw in candidates if _xradar_worthy(tw.get("text") or "")]
+    _sem = asyncio.Semaphore(8)  # классификатор параллельно, но не больше 8 разом (rate-limit)
+
+    async def _xw(tw):
+        async with _sem:
+            return await asyncio.to_thread(_xradar_worthy, tw.get("text") or "")
+
+    _flags = await asyncio.gather(*[_xw(tw) for tw in candidates])
+    worthy = [tw for tw, ok in zip(candidates, _flags) if ok]
     if not worthy:
         await update.message.reply_text(
             "Горячее по темам есть, но всё мусор. Под реплай ничего годного, загляни позже."
@@ -5234,13 +5241,14 @@ async def cmd_reddit(update, context):
     await update.message.reply_text("Сканирую Reddit по болям, 30-60 сек...")
     keys = [k.lower() for k in REDDIT_PAIN_KEYWORDS]
     groups = [REDDIT_SUBS[i:i + 3] for i in range(0, len(REDDIT_SUBS), 3)]
-    raw = []
-    for gi, group in enumerate(groups):
-        xml = _reddit_fetch("https://www.reddit.com/r/%s/new/.rss?limit=60" % "+".join(group))
-        if xml:
-            raw.extend(_reddit_parse(xml))
-        if gi < len(groups) - 1:
-            _t.sleep(5)
+
+    async def _fetch_group(group):
+        url = "https://www.reddit.com/r/%s/new/.rss?limit=60" % "+".join(group)
+        xml = await asyncio.to_thread(_reddit_fetch, url)
+        return _reddit_parse(xml) if xml else []
+
+    fetched = await asyncio.gather(*[_fetch_group(g) for g in groups])  # все группы параллельно
+    raw = [e for sub in fetched for e in sub]
     # грубое сито: свежесть + болевой ключ + тема + не спам + не показан ранее
     cutoff = datetime.now(timezone.utc) - timedelta(days=10)
     cand = []
@@ -5270,7 +5278,15 @@ async def cmd_reddit(update, context):
         await update.message.reply_text("Свежих болей по темам за 10 дней не нашлось. Загляни позже.")
         return
     await update.message.reply_text(f"Нашёл {len(cand)} кандидатов, отсеиваю self-promo/рекламу/мусор...")
-    worthy = [e for e in cand[:40] if _reddit_worthy(e["title"], e["body"])]
+    subset = cand[:40]
+    _sem = asyncio.Semaphore(8)  # классификатор параллельно, но не больше 8 разом (rate-limit)
+
+    async def _rw(e):
+        async with _sem:
+            return await asyncio.to_thread(_reddit_worthy, e["title"], e["body"])
+
+    _flags = await asyncio.gather(*[_rw(e) for e in subset])
+    worthy = [e for e, ok in zip(subset, _flags) if ok]
     if not worthy:
         await update.message.reply_text("Свежее есть, но всё мусор — анонсы, реклама, self-promo. Под коммент ничего, загляни позже.")
         return
