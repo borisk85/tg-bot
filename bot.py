@@ -5786,8 +5786,8 @@ def main():
             BotCommand("reminders", "Активные напоминания"),
             BotCommand("xradar", "Горячие посты X по моим темам"),
             BotCommand("reddit", "Свежие треды Reddit с болью под коммент"),
-            BotCommand("rc", "Сгенерить reddit-коммент: /rc + текст боли"),
-            BotCommand("xr", "Сгенерить X-реплай: /xr + текст поста"),
+            BotCommand("rc", "Reddit-коммент по треду (текст + фото)"),
+            BotCommand("xr", "X-реплай по посту (текст + фото)"),
         ])
     app.post_init = post_init
 
