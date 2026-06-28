@@ -5122,27 +5122,26 @@ def _xradar_worthy(text: str) -> bool:
             model="claude-sonnet-4-6",
             max_tokens=5,
             system=(
-                "You are a STRICT filter for X/Twitter posts. A solo founder of a PERSONAL AI ASSISTANT product replies with "
-                "genuine value to grow his account. He should reply ONLY where a substantive on-topic reply truly fits AND the "
-                "audience is relevant (builders, indie founders, people discussing AI assistants/tools/productivity). Answer "
-                "ONE word: yes or no.\n"
-                "YES only if BOTH hold:\n"
-                "1) The post invites a real reply: an explicit question, a stated problem/frustration, or a genuine "
-                "opinion/discussion prompt people will argue with — NOT a closed statement or a finished story.\n"
-                "2) Topic is about: AI assistants / chatbots / choosing or using AI, building small AI products as an indie "
-                "founder, personal productivity with AI, or everyday problems a personal AI assistant solves.\n"
-                "Answer NO (drop) for ALL of these, even if AI is mentioned:\n"
-                "- ADS / PROMOTION / PARTNERSHIPS: 'in partnership with X', shilling a named company/product, a testimonial "
-                "praising another product.\n"
-                "- VIRAL STORY / FLEX / ANECDOTE with no question to engage ('a 68yo built X', 'how I made $$$', 'Upwork gave "
-                "me my break') — a story is not a discussion prompt.\n"
-                "- ENTERPRISE / B2B infra, multi-user permissions, corporate deployment — wrong audience.\n"
-                "- NARROW DEV-TOOLING: Claude Code internals, coding/agent runtime, permissions, devops — developer audience, "
-                "not personal-assistant users.\n"
-                "- off-topic: crypto, hardware, e-commerce, generic career/freelance, celebrity/mainstream.\n"
-                "- engagement-bait: follow-train, 'let's connect', 'drop your link', listicle/tool dump, giveaway, pure teaser.\n"
-                "If the post is a closed statement/flex/story with no hook, OR off the niche, OR promoting something, OR you "
-                "are unsure — answer no. Dropping a borderline post is far better than passing junk."
+                "You filter X/Twitter posts for a solo AI-native founder who replies with genuine value to GROW his X "
+                "account through steady daily activity. He needs a STEADY STREAM of posts worth a real reply, across his "
+                "whole field, not only posts about his exact product. Answer ONE word: yes or no.\n"
+                "YES if BOTH hold:\n"
+                "1) FIELD (broad): the post touches AI, AI agents/assistants/chatbots, LLMs, building software with AI, "
+                "SaaS, indie hacking, building in public, startups and founders, no-code, vibe coding, dev tools and "
+                "developer experience, productivity, or shipping products. Anywhere in this space counts.\n"
+                "2) SOMETHING TO SAY: there's a real hook to reply to — an opinion, a question, a problem/frustration, a "
+                "lesson, a hot take, a build/progress update, or an experience. He can agree, add value, push back, or share "
+                "his own take. Even a personal story or a flex counts IF he can add a genuine reply.\n"
+                "Answer NO only for REAL junk:\n"
+                "- pure ads / promotion / 'in partnership with X' / shilling a product with a buy link.\n"
+                "- engagement-bait: follow-train, 'let's connect', 'drop your link below', giveaways, 'like if you agree' "
+                "with no real content.\n"
+                "- a bare one-line teaser/flex with literally nothing to engage with.\n"
+                "- totally off-field: crypto trading calls, sports, politics, celebrity/mainstream gossip unrelated to "
+                "tech or building.\n"
+                "- a mega-account post (Elon/Durov-tier) already buried under thousands of replies where his would drown.\n"
+                "When in doubt, lean YES. He needs volume for account growth, so a slightly-off but on-field post with any "
+                "hook is fine to reply to. Only drop clear junk."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
@@ -5182,6 +5181,8 @@ async def cmd_xradar(update, context):
             if not tid or tid in seen:
                 continue
             if tw.get("isReply"):  # хотим исходные посты, не чужие ответы
+                continue
+            if (tw.get("replyCount", 0) or 0) > 200:  # перегружен реплаями (levelsio/мега) — твой утонет
                 continue
             low = (tw.get("text") or "").lower()
             if any(b in low for b in X_RADAR_BLOCK):  # крипто/спам отсекаем
@@ -5338,28 +5339,22 @@ def _reddit_worthy(title, body):
             model="claude-sonnet-4-6",
             max_tokens=5,
             system=(
-                "You are a STRICT filter. A founder of a PERSONAL AI ASSISTANT product (an AI helper inside Telegram for "
-                "everyday people) will post a genuine, helpful comment on EVERY post you pass YES — no second filtering. So "
-                "pass ONLY posts that clearly deserve a substantive on-topic reply. Answer ONE word: yes or no.\n"
-                "Answer YES only if BOTH hold:\n"
-                "1) TOPIC is squarely about: choosing or comparing AI chat assistants, AI assistant bots / chatbots, personal "
-                "productivity with AI, automation of everyday tasks, AI memory/context, or the everyday problems a personal AI "
-                "assistant solves.\n"
-                "2) The post gives a real hook to respond to: an explicit question, a request for a recommendation, a stated "
-                "personal problem/frustration, or a genuine open discussion/opinion prompt — where a thoughtful reply obviously fits.\n"
-                "Answer NO (drop it) for ALL of the following, EVEN IF AI is mentioned:\n"
-                "- OFF-TOPIC niches: ecommerce / product feeds, devops / infrastructure, security research, hardware or physical "
-                "devices, crypto, dev tooling, data pipelines, low-level coding — anything NOT about personal AI assistants, "
-                "chat, or everyday productivity.\n"
-                "- SELF-PROMO / SHOWCASE: the author is presenting their OWN project, app, tool or research. Tells: 'I built', "
-                "'I made', 'I launched', \"I've been working on\", 'my app/tool/project', 'sharing my', 'looking for feedback', "
-                "'roast my', 'check out my', 'feedback welcome'. This is promotion, not a discussion prompt — ALWAYS no.\n"
-                "- NARROW PRODUCT COMPLAINT / FEATURE WISH about ONE specific third-party app or bot ('I wish App X had feature "
-                "Y', a bug in one tool/library) — too narrow, no.\n"
-                "- a joke, meme, rant, story, flex, or observation with NO real question or problem to answer.\n"
-                "- spam, ads, giveaways, release announcements, tutorials, tool dumps.\n"
-                "If the topic is off the niche, OR the author is promoting their own thing, OR you are unsure — answer no. "
-                "Dropping a borderline post is far better than passing junk."
+                "You filter Reddit posts for a solo AI-native founder who comments with genuine value to build karma and "
+                "presence through steady activity. He needs a STEADY STREAM of posts worth a real comment across his whole "
+                "field, not only posts about his exact product. Answer ONE word: yes or no.\n"
+                "YES if BOTH hold:\n"
+                "1) FIELD (broad): the post touches AI, AI agents/assistants/chatbots, LLMs, building software with AI, SaaS, "
+                "indie hacking, building in public, startups and founders, no-code, vibe coding, dev tools and developer "
+                "experience, productivity, or shipping products. Anywhere in this space counts.\n"
+                "2) SOMETHING TO SAY: a real hook — a question, a request for advice, a problem/frustration, an "
+                "opinion/discussion, a lesson, a build update, or an experience. He can answer, add value, push back, or "
+                "share his own take. A showcase or 'I built X' counts IF he can leave a genuine useful comment (real feedback).\n"
+                "Answer NO only for REAL junk:\n"
+                "- spam, pure ads, affiliate / buy links, giveaways, paid promo.\n"
+                "- engagement-bait with no content, 'upvote if', karma farming, low-effort title with no body.\n"
+                "- totally off-field: crypto trading calls, sports, politics, mainstream gossip unrelated to tech or building.\n"
+                "When in doubt, lean YES. He needs volume for karma and presence, so a slightly-off but on-field post with "
+                "any hook is fine to comment on. Only drop clear junk."
             ),
             messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
         )
