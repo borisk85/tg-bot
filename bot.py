@@ -4324,7 +4324,6 @@ _MENU_CMDS_RU = [
     ("reddit", "Свежие треды Reddit с болью под коммент"),
     ("rc", "Reddit-коммент по треду (текст + фото)"),
     ("rp", "Reddit-пост по твоему драфту"),
-    ("xr", "X-реплай по посту (текст + фото)"),
     ("en", "Меню на английском"),
     ("ru", "Меню на русском"),
 ]
@@ -4340,7 +4339,6 @@ _MENU_CMDS_EN = [
     ("reddit", "Fresh Reddit threads with pain to comment on"),
     ("rc", "Reddit comment by thread (text + photo)"),
     ("rp", "Reddit post from your draft"),
-    ("xr", "X reply by post (text + photo)"),
     ("en", "Switch menu to English"),
     ("ru", "Switch menu to Russian"),
 ]
@@ -4806,7 +4804,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Состояние в Redis (переживает перезапуск бота при деплое), не в памяти процесса.
     pending = _get_await(user_id)
     _clear_await(user_id)
-    if pending in ("rc", "xr", "rp"):
+    if pending in ("rc", "rp"):
         gen_img = None
         if update.message.photo:  # только фото, видео не поддерживается
             try:
@@ -4835,8 +4833,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _clear_genimg(user_id)
         if pending == "rc":
             await _rc_generate(update, gen_text, gen_img)
-        elif pending == "xr":
-            await _xr_generate(update, gen_text, gen_img)
         else:
             await _rp_generate(update, gen_text, gen_img)
         return
@@ -5869,83 +5865,6 @@ async def _rp_generate(update, brief, image_data=None):
         await update.message.reply_text("Не вышло сгенерить пост, попробуй ещё раз.")
 
 
-async def cmd_xr(update, context):
-    """X-реплай, шаг 1: /xr → ждём текст поста следующим сообщением."""
-    _set_await(update.effective_user.id, "xr")
-    await update.message.reply_text("Кидай текст X-поста")
-
-
-async def _xr_generate(update, post, image_data=None):
-    """X-реплай, шаг 2: текст (+ фото через Sonnet-описание) → Opus."""
-    await update.message.reply_text("Пишу реплай...")
-    try:
-        if image_data:
-            _d = _describe_image(image_data)   # фото анализирует Sonnet, Opus получает только текст-описание
-            if _d:
-                post = (post + "\n\n[Image attached to the post, described]: " + _d).strip()
-        resp = anthropic.messages.create(
-            model="claude-opus-4-8",
-            max_tokens=1500,
-            tools=[_WEB_SEARCH_TOOL],
-            system=(
-                "You are a real indie founder, a NON-native English speaker, replying to a post on X/Twitter. "
-                "Write ONE reply that reads as a genuine human, never AI.\n"
-                "X BEST PRACTICES (research-based, X differs from reddit):\n"
-                "- Reply quality is a DIRECT ranking signal since 2026, and Premium users can downvote replies flagged as "
-                "AI-generated. So be specific and genuine to THIS exact post — vague or AI-sounding replies get downranked.\n"
-                "- VERY SHORT: X replies do best at ~71-100 characters (roughly 12-18 words), one clear point. Shorter than "
-                "a reddit comment. No padding, no preamble.\n"
-                "- Be substantive and SPECIFIC to this exact post. No generic praise.\n"
-                "- Authentic engagement, not engagement-bait. Don't ask people to follow/like.\n"
-                "- Do NOT put external links in the reply (links cut reach 30-50% on X).\n"
-                "STYLE — must NOT look like AI:\n"
-                "- You are NOT a native English speaker, level B1-B2. Mostly simple words and simple sentences. Grammar is "
-                "NOT perfect: let natural non-native mistakes through (wrong or missing articles a/the, off prepositions, "
-                "small typos). Research on AI detection: the biggest tell is text too smooth with NO errors and an even flat "
-                "rhythm. So a couple of small real non-native mistakes plus varied sentence length is what makes it read human. "
-                "Never flawless, polished AI English.\n"
-                "- NO em-dashes anywhere. NO LLM cliches (game-changer, honestly, that said, delve, leverage, "
-                "this., it's not just X it's Y). NO fake enthusiasm or hype.\n"
-                "- Casual. Light slang ok (tbh, imo, ngl, gonna).\n"
-                "- No hashtags. Emojis only if truly natural, otherwise none.\n"
-                "PROMOTION (be a genuine participant, not a promoter — authentic value first, X penalizes spammy self-promo):\n"
-                "- On most posts: NO product, just a genuine reply.\n"
-                "- BUT when the fit is CLEAR — they describe wanting exactly what VELA is (an AI assistant that lives where "
-                "they already work / inside Telegram, with persistent memory, no API key) — you SHOULD mention it once, "
-                "naturally, as your own experience, plainly that it's yours ('my own telegram AI assistant i made for "
-                "this'). ALWAYS call it a personal AI assistant (in telegram), NEVER 'a bot'. On a clear fit do NOT stay "
-                "silent. Keep it casual, one mention, never salesy.\n"
-                "- LINK SAFETY (research-based, prevents bans): do NOT put the URL velabot.io in the reply by default — the "
-                "bare fact ('a personal AI assistant i made in telegram') is safe, a link is what gets flagged/shadowbanned. Include velabot.io "
-                "ONLY if they explicitly ask for a name or link. Otherwise name/fact only, no URL.\n"
-                "- Silence is the default ONLY for non-fits and borderline cases, NOT for an obvious fit.\n"
-                + BORIS_PROFILE +
-                "\nFACT CHECK: if your reply states any concrete fact — a price, a free/paid status, a usage limit, a model "
-                "name or version, a date, a specific feature — you MUST use web_search to verify it is current and true "
-                "BEFORE writing it. If the reply is pure opinion/experience with no concrete facts, do not search. Never "
-                "narrate your searching, never put links or citations in the reply. Output only the final human reply.\n"
-                "\nFINAL CHECK before output — ALL must hold: NOTHING about your experience/workflow that contradicts the "
-                "real facts (you are AI-native, build through AI, NOT by hand) and NOTHING fabricated — if unsure, make zero "
-                "personal claims; B1-B2 English with real mistakes (NOT flawless); no em-dashes; "
-                "no AI cliches, no hype/marketing words; short and punchy, specific to the post; no neat 3-item comma list; "
-                "no ad or pitch, your-experience detail only if it truly fits, else none. If any fails, fix it before sending.\n"
-                "OUTPUT ONLY the single final reply text. NEVER write your reasoning, NEVER write 'wait', 'let me redo', "
-                "'let me rewrite', NEVER show a draft then a correction — do all that silently and output only the one final "
-                "clean reply, nothing else."
-            ),
-            messages=[{"role": "user", "content": f"X post:\n{post[:2000]}"}],
-        )
-        reply = _final_text_after_search(resp)   # финальный текст после веб-проверки фактов
-        reply = _strip_ai_tells(reply)   # механическая самопроверка на ИИ-маркеры (em-dash, тройной список)
-        reply = _downgrade_nonnative(reply)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
-        reply = _enforce_short(reply, max_words=25)   # X-реплай короткий (X идеал ~71-100 символов)
-        reply = _tidy(reply)   # один блок + убрать honestly + срезать самокоррекцию модели
-        reply = re.sub(r"\bi\b", "I", reply)   # местоимение I всегда заглавное (механически)
-        await update.message.reply_text(reply or "Пусто, попробуй ещё раз с текстом поста.")
-    except Exception as e:
-        logger.error(f"cmd_xr failed: {e}", exc_info=True)
-        await update.message.reply_text("Не вышло сгенерить реплай, попробуй ещё раз.")
-
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -5975,7 +5894,6 @@ def main():
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
     app.add_handler(CommandHandler("rp", cmd_rp))
-    app.add_handler(CommandHandler("xr", cmd_xr))
     app.add_handler(CommandHandler("en", cmd_en))
     app.add_handler(CommandHandler("ru", cmd_ru))
     app.add_handler(InlineQueryHandler(handle_inline_query))
