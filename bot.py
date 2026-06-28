@@ -4320,7 +4320,6 @@ _MENU_CMDS_RU = [
     ("memory", "Что бот знает обо мне"),
     ("about", "Рассказать о себе"),
     ("reminders", "Активные напоминания"),
-    ("xradar", "Горячие посты X по моим темам"),
     ("reddit", "Свежие треды Reddit с болью под коммент"),
     ("rc", "Reddit-коммент по треду (текст + фото)"),
     ("rp", "Reddit-пост по твоему драфту"),
@@ -4335,7 +4334,6 @@ _MENU_CMDS_EN = [
     ("memory", "What the bot knows about me"),
     ("about", "Tell about yourself"),
     ("reminders", "Active reminders"),
-    ("xradar", "Hot X posts on my topics"),
     ("reddit", "Fresh Reddit threads with pain to comment on"),
     ("rc", "Reddit comment by thread (text + photo)"),
     ("rp", "Reddit post from your draft"),
@@ -5077,193 +5075,6 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.inline_query.answer(results, cache_time=0)
 
 
-# ── X-радар: горячие посты по моим темам для реплаев ──────────────────────────
-X_RADAR_QUERIES = [
-    # Отобрано по РЕАЛЬНОМУ прогону через API (clean/total за 2 дня, 25.06):
-    # personal AI 17/18, build in public 17/20, vibe coding 17/20, no code AI 11/20,
-    # AI agent telegram 10/19, indie hacker 6/6. Выброшены: "telegram bot AI" (1/7 мусор),
-    # "shipped my" (3/5 мало), "AI assistant in telegram" (редкий).
-    '"personal AI" min_faves:10',
-    '"build in public" min_faves:20',
-    '"vibe coding" min_faves:10',
-    '"no code" "AI" min_faves:10',
-    '"AI agent" telegram min_faves:5',
-    '"indie hacker" min_faves:10',
-    # добавлено по прогону через API (clean/total): solo founder 18/20, solopreneur 16/19,
-    # Claude Code 11/20, AI startup 11/20. micro saas (2/3) и telegram bot AI (1/7) — отброшены.
-    '"solo founder" min_faves:10',
-    '"solopreneur" min_faves:10',
-    '"Claude Code" min_faves:10',
-    '"AI startup" min_faves:15',
-    # 2-й раунд прогона: AI SaaS 14/19, AI builder 13/18. Отброшены shipping 7/11, bootstrapped 3/4, wrapper 4/6 (мало/средне).
-    '"AI SaaS" min_faves:10',
-    '"AI builder" min_faves:5',
-]
-# крипто/спам-маркеры — посты с ними отсекаем (как Finora $SIREN, трейдинг и пр.)
-X_RADAR_BLOCK = ("$", "crypto", "airdrop", "presale", "memecoin", "pump", "trading",
-                 "altcoin", "nft", "token", "bullish", "bearish", "casino", "betting")
-# явные приманки/фоллоу-трейны/giveaway — отсекаем по фразе (семантику ловит классификатор ниже)
-X_RADAR_BAIT = (
-    "let's connect", "lets connect", "let's grow together", "lets grow together", "grow together",
-    "drop a link", "drop your link", "drop what you're building", "drop what you are building",
-    "follow everyone", "i'll follow", "ill follow", "follow back", "followback", "must follow",
-    "comment below", "reply with your", "tag a friend", "tag someone", "rt if", "like if you",
-    "retweet if", "repost if", "giveaway", "who's building", "whos building",
-)
-
-
-def _xradar_worthy(text: str) -> bool:
-    """Haiku-классификатор: годен ли пост под содержательный реплай (True) или это мусор (False)."""
-    t = (text or "").strip()
-    if len(t) < 25:  # слишком короткий тизер/флекс — почти всегда мусор
-        return False
-    try:
-        resp = anthropic.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=5,
-            system=(
-                "You filter X/Twitter posts for a solo AI-native founder who replies with genuine value to GROW his X "
-                "account through steady daily activity. He needs a STEADY STREAM of posts worth a real reply, across his "
-                "whole field, not only posts about his exact product. Answer ONE word: yes or no.\n"
-                "YES if BOTH hold:\n"
-                "1) FIELD (broad): the post touches AI, AI agents/assistants/chatbots, LLMs, building software with AI, "
-                "SaaS, indie hacking, building in public, startups and founders, no-code, vibe coding, dev tools and "
-                "developer experience, productivity, or shipping products. Anywhere in this space counts.\n"
-                "2) SOMETHING TO SAY: there's a real hook to reply to — an opinion, a question, a problem/frustration, a "
-                "lesson, a hot take, a build/progress update, or an experience. He can agree, add value, push back, or share "
-                "his own take. Even a personal story or a flex counts IF he can add a genuine reply.\n"
-                "Answer NO only for REAL junk:\n"
-                "- pure ads / promotion / 'in partnership with X' / shilling a product with a buy link.\n"
-                "- engagement-bait: follow-train, 'let's connect', 'drop your link below', giveaways, 'like if you agree' "
-                "with no real content.\n"
-                "- a bare one-line teaser/flex with literally nothing to engage with.\n"
-                "- totally off-field: crypto trading calls, sports, politics, celebrity/mainstream gossip unrelated to "
-                "tech or building.\n"
-                "- a mega-account post (Elon/Durov-tier) already buried under thousands of replies where his would drown.\n"
-                "When in doubt, lean YES. He needs volume for account growth, so a slightly-off but on-field post with any "
-                "hook is fine to reply to. Only drop clear junk."
-            ),
-            messages=[{"role": "user", "content": f"Post:\n{t[:1500]}"}],
-        )
-        ans = "".join(b.text for b in resp.content if hasattr(b, "text")).strip().lower()
-        return ans.startswith("y")
-    except Exception as e:
-        logger.warning(f"xradar classify failed: {e}")
-        return True  # при сбое классификатора не теряем пост
-
-
-async def cmd_xradar(update, context):
-    """X-радар: ищет свежие горячие посты по моим темам, отдает топ со ссылками для реплаев."""
-    await update.message.reply_text("Сканирую X по твоим темам, 20-40 сек...")
-    api_key = os.getenv("TWITTERAPI_KEY")
-    if not api_key:
-        await update.message.reply_text("Не задан TWITTERAPI_KEY в .env.")
-        return
-    import time as _t
-    since = int(_t.time()) - 2 * 86400  # последние 2 дня
-    seen, posts, raw_total = set(), [], 0
-    for q in X_RADAR_QUERIES:
-        query = f'{q} lang:en since_time:{since}'  # min_faves уже внутри каждого запроса
-        try:
-            resp = requests.get(
-                "https://api.twitterapi.io/twitter/tweet/advanced_search",
-                headers={"X-API-Key": api_key},
-                params={"query": query, "queryType": "Top"},
-                timeout=25,
-            )
-            tweets = resp.json().get("tweets", []) or []
-            raw_total += len(tweets)
-        except Exception as e:
-            logger.warning(f"xradar query failed [{q}]: {e}")
-            continue
-        for tw in tweets:
-            tid = tw.get("id")
-            if not tid or tid in seen:
-                continue
-            if tw.get("isReply"):  # хотим исходные посты, не чужие ответы
-                continue
-            if (tw.get("replyCount", 0) or 0) > 200:  # перегружен реплаями (levelsio/мега) — твой утонет
-                continue
-            low = (tw.get("text") or "").lower()
-            if any(b in low for b in X_RADAR_BLOCK):  # крипто/спам отсекаем
-                continue
-            if any(b in low for b in X_RADAR_BAIT):  # приманки/фоллоу-трейны/giveaway
-                continue
-            if redis_client:  # дедуп между прогонами: уже показанные посты не повторяем
-                try:
-                    if redis_client.exists(f"xradar:shown:{tid}"):
-                        continue
-                except Exception:
-                    pass
-            seen.add(tid)
-            posts.append(tw)
-    logger.info(f"xradar: API вернул {raw_total} сырых твитов по {len(X_RADAR_QUERIES)} запросам, "
-                f"{len(posts)} осталось после фильтров/дедупа")
-    if not posts:
-        await update.message.reply_text(
-            "По твоим темам за 2 дня горячего без спама не нашлось. Загляни позже."
-        )
-        return
-
-    def _eng(tw):
-        return (tw.get("likeCount", 0) or 0) + (tw.get("retweetCount", 0) or 0) * 2 + (tw.get("replyCount", 0) or 0)
-
-    posts.sort(key=_eng, reverse=True)
-    # фильтр качества: топ-40 по engagement прогоняем через классификатор, оставляем только пригодные под реплай
-    candidates = posts[:40]
-    await update.message.reply_text(
-        f"Нашёл {len(posts)} постов, отсеиваю мусор..."
-    )
-    _sem = asyncio.Semaphore(8)  # классификатор параллельно, но не больше 8 разом (rate-limit)
-
-    async def _xw(tw):
-        async with _sem:
-            return await asyncio.to_thread(_xradar_worthy, tw.get("text") or "")
-
-    _flags = await asyncio.gather(*[_xw(tw) for tw in candidates])
-    worthy = [tw for tw, ok in zip(candidates, _flags) if ok]
-    if not worthy:
-        await update.message.reply_text(
-            "Горячее по темам есть, но всё мусор. Под реплай ничего годного, загляни позже."
-        )
-        return
-    top = worthy[:15]
-    if redis_client:  # запоминаем показанные на 14 дней, чтобы следующий прогон их не повторял
-        for tw in top:
-            try:
-                redis_client.set(f"xradar:shown:{tw.get('id')}", "1", ex=1209600)
-            except Exception:
-                pass
-    header = (
-        f"X-радар — {len(top)} постов ПОД РЕПЛАЙ (из {len(posts)} сырых, мусор отфильтрован).\n"
-        f"Тапни ссылку → ответь прямо в X.\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    blocks = [header]
-    for i, tw in enumerate(top, 1):
-        a = tw.get("author") or {}
-        name = a.get("name") or a.get("userName") or "—"
-        uname = a.get("userName") or ""
-        foll = a.get("followers", 0) or 0
-        foll_s = f"{foll // 1000}k" if foll >= 1000 else str(foll)
-        likes = tw.get("likeCount", 0) or 0
-        rts = tw.get("retweetCount", 0) or 0
-        reps = tw.get("replyCount", 0) or 0
-        url = tw.get("url") or tw.get("twitterUrl") or ""
-        txt = " ".join((tw.get("text") or "").split())
-        if len(txt) > 220:
-            txt = txt[:217] + "..."
-        blocks.append(
-            f"\n{i}. 👤 {name} (@{uname}) · {foll_s} подписчиков\n"
-            f"💬 {txt}\n"
-            f"♥ {likes}   🔁 {rts}   💬 {reps}\n"
-            f"➡️ {url}"
-        )
-    full = "\n".join(blocks)
-    for i in range(0, len(full), 4096):
-        await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
-
-
 # ── Reddit-радар: свежие треды с РЕАЛЬНОЙ болью под коммент (read-only RSS, аккаунт не трогаем) ──
 REDDIT_SUBS = ["openclaw", "SideProject", "SaaS", "ChatGPTCoding", "ArtificialInteligence",
                "MachineLearning", "AIAssisted", "ProductivityApps", "aiagents", "telegram"]
@@ -5885,7 +5696,6 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
-    app.add_handler(CommandHandler("xradar", cmd_xradar))
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
     app.add_handler(CommandHandler("rp", cmd_rp))
