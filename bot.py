@@ -5507,6 +5507,23 @@ async def cmd_rc(update, context):
     await update.message.reply_text("Кидай текст треда (можно с фото)")
 
 
+def _strip_agreement_opener(text):
+    """Срезать зачин-поддакивание (Exactly, Yes, Agreed, So true, ...) — Opus игнорит промпт-правило.
+    Только при пунктуации после слова, чтобы не задеть 'True leverage'/'Right call'."""
+    if not text:
+        return text
+    t = text.strip()
+    m = re.match(
+        r"(?i)^(yes exactly|yes|exactly|agreed|agree|so true|so this|totally|absolutely|"
+        r"definitely|right|true|facts|100%|spot on|well said|great point|this)[,.!:—-]+\s*",
+        t)
+    if m:
+        rest = t[m.end():].strip()
+        if rest:
+            t = rest[0].upper() + rest[1:]
+    return t
+
+
 async def _rc_generate(update, pain, image_data=None):
     """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Opus. Без рекламы, без LLM-щины."""
     await update.message.reply_text("Пишу коммент...")
@@ -5531,10 +5548,19 @@ async def _rc_generate(update, pain, image_data=None):
                 "- Be a genuine participant who helps, not a promoter. Answer / actually help with their problem first.\n"
                 "- Real value gets upvoted: give a concrete tip from experience, or 1-2 options, and it's fine to admit a trade-off — that reads honest.\n"
                 "- Sound like a friend giving honest advice, not a brand.\n"
-                "- NEVER claim you used, tested, tried or installed the product/tool/app the post is about — you have NOT. "
-                "Do NOT write 'works smooth', 'i've been using it', 'i tried it', 'been running it', 'the X part is great'. "
-                "React to the IDEA, the approach, a specific detail they described, or ask a real question. Fake hands-on "
-                "experience gets called out and kills trust instantly.\n"
+                "- TWO hard NO-FABRICATION rules: (a) NEVER claim you used, tested, tried or installed the product/tool in "
+                "the post (you have NOT) — no 'works smooth', 'i've been using it', 'i tried it'. (b) NEVER invent a "
+                "specific project or app you 'built'/'shipped' to sound relatable — no 'on my Flutter app', 'when i built "
+                "my iOS app', 'my mobile app' — UNLESS you really built that. You build VELA, a personal AI assistant in "
+                "Telegram on a Python backend, THROUGH AI; you have NOT built mobile/iOS/Android/Flutter apps, games, or "
+                "browser extensions. React to the IDEA, speak only from your REAL work, or keep the point general. "
+                "Made-up experience gets called out and kills trust instantly.\n"
+                "- NEVER open with agreement ('Yes', 'Exactly', 'Agreed', 'So true', 'This', 'Right', 'Totally'). Opening "
+                "with agreement is a bot tell. Lead with your point, a specific detail, your own take, or a question.\n"
+                "- Do NOT echo the author or restate what they already said (e.g. they give their token numbers and you "
+                "repeat the same numbers, or they post a warning and you reply 'good warning about X'). Restating adds "
+                "nothing and reads weak. Bring something NEW: a point they did not make, an opinion, a counter-take, a "
+                "concrete detail, or a real question. The reader must get something the post did not already contain.\n"
                 "STYLE — must NOT look like AI (this is the #1 priority). All points below come from research:\n"
                 "- You are a non-native B1-B2 English speaker. Research on non-native writing: typical errors are wrong or "
                 "missing articles ('in middle' instead of 'in the middle'), wrong prepositions ('discuss about' instead of "
@@ -5594,6 +5620,7 @@ async def _rc_generate(update, pain, image_data=None):
         comment = _downgrade_nonnative(comment)   # роняем гладкий нативный английский до B1-B2 + срезаем менторский тон
         comment = _enforce_short(comment, max_words=_target_words(pain))   # потолок длины из треда (Opus игнорит лимит в промпте)
         comment = _tidy(comment)   # один блок + убрать honestly
+        comment = _strip_agreement_opener(comment)   # срезать зачин-согласие (Opus игнорит промпт)
         comment = re.sub(r"\bi\b", "I", comment)   # местоимение I всегда заглавное (механически, не зависит от модели)
         await update.message.reply_text(comment or "Пусто, попробуй ещё раз с текстом боли.")
     except Exception as e:
