@@ -5239,16 +5239,9 @@ async def cmd_reddit(update, context):
                 redis_client.set(f"reddit:shown:{e['id']}", "1", ex=1209600)
             except Exception:
                 pass
-    blocks = [f"🔎 Reddit-радар — {len(top)} тредов ПОД КОММЕНТ (из {len(cand)} сырых, мусор отсеян).\n"
-              f"Открой тред → ответь /rc + текст боли, дам коммент.\n━━━━━━━━━━━━━━━━━━━━"]
+    blocks = [f"🔎 Reddit-радар — {len(top)} тредов под коммент (из {len(cand)} сырых)."]
     for i, e in enumerate(top, 1):
-        body = " ".join(e["body"].split())
-        if len(body) > 200:
-            body = body[:197] + "..."
-        blocks.append(f"\n{i}. 📍 r/{e['sub']} · {e['updated'][:10]}\n"
-                      f"📌 {e['title'][:130]}\n"
-                      f"💬 {body}\n"
-                      f"➡️ {e['link']}")
+        blocks.append(f"\n{i}. {e['title'][:140]}\n{e['link']}")
     full = "\n".join(blocks)
     for i in range(0, len(full), 4096):
         await update.message.reply_text(full[i:i + 4096], disable_web_page_preview=True)
