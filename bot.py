@@ -4798,7 +4798,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text or update.message.caption or ""
 
-    # Двухшаговые генераторы: /rc или /xr ждут текст и/или ФОТО следующим сообщением.
+    # Двухшаговые генераторы: /rc или /rp ждут текст и/или ФОТО следующим сообщением.
     # Состояние в Redis (переживает перезапуск бота при деплое), не в памяти процесса.
     pending = _get_await(user_id)
     _clear_await(user_id)
@@ -5283,7 +5283,7 @@ BORIS_PROFILE = (
 )
 
 
-# Состояние двухшаговых генераторов /rc /xr — в Redis (с TTL), а НЕ в памяти процесса:
+# Состояние двухшаговых генераторов /rc /rp — в Redis (с TTL), а НЕ в памяти процесса:
 # иначе перезапуск бота (деплой) теряет «жду текст треда», и текст уходит в обычный чат-режим.
 _mem_await = {}
 _mem_genimg = {}
@@ -5707,9 +5707,17 @@ def main():
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
     # Дефолтное меню Telegram — русское (свич на англ через /en, обратно /ru)
-    from telegram import BotCommand
+    from telegram import BotCommand, BotCommandScopeChat
     async def post_init(application):
-        await application.bot.set_my_commands([BotCommand(c, d) for c, d in _MENU_CMDS_RU])
+        cmds_ru = [BotCommand(c, d) for c, d in _MENU_CMDS_RU]
+        await application.bot.set_my_commands(cmds_ru)  # глобальный скоуп
+        # Перетираем и чат-скоуп владельца: он перебивает глобальный и держал старое меню
+        # (удалённые команды вроде /xradar висели в нём и срабатывали тихо).
+        for uid in ALLOWED_USERS:
+            try:
+                await application.bot.set_my_commands(cmds_ru, scope=BotCommandScopeChat(uid))
+            except Exception as e:
+                logger.warning(f"post_init: не удалось обновить чат-меню {uid}: {e}")
     app.post_init = post_init
 
     logger.info("Бот запущен!")
