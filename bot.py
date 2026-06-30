@@ -4223,8 +4223,6 @@ START_RU = (
     "— актуальная информация из сети\n\n"
     "🎨 Генерация изображений\n"
     "— создание изображений по описанию\n\n"
-    "🔭 X-радар\n"
-    "— горячие посты X по нужным темам под реплай, генерация реплая\n\n"
     "🧲 Reddit-радар\n"
     "— свежие треды Reddit с болью под коммент, генерация коммента"
 )
@@ -4275,8 +4273,6 @@ START_EN = (
     "— up-to-date info from the internet\n\n"
     "🎨 Image generation\n"
     "— create images from a description\n\n"
-    "🔭 X radar\n"
-    "— hot X posts on the right topics to reply to, reply generation\n\n"
     "🧲 Reddit radar\n"
     "— fresh Reddit threads with pain to comment on, comment generation"
 )
