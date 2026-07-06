@@ -479,8 +479,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Команды бота:
 /clear — очистить историю
 /myid — Telegram ID
-/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram (СНГ + мир/EN) прямо сейчас (каждый пн в 12:00 приходит автоматически)
-/mailkit_digest — запустить дайджест по конкурентам MailKit на EN-рынке прямо сейчас (каждый пн в 12:05 приходит автоматически)"""
+/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram (СНГ + мир/EN) прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
 
 # ── Weather helpers ───────────────────────────────────────────────────────────
 
@@ -3744,182 +3743,6 @@ Career Pass (15-18 лет): выбирает профессию → риск н�
         await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка Career Navigator дайджеста: {e}")
 
 
-async def send_weekly_mailkit_digest(context):
-    """Еженедельный дайджест по конкурентам MailKit на EN-рынке — каждый пн в 12:05."""
-    user_id = 661638470
-    try:
-        await context.bot.send_chat_action(chat_id=user_id, action="typing")
-
-        BRAVE_QUERIES = [
-            "custom domain email gmail setup service launch 2026",
-            "SendMailAs alternative email domain automation",
-            "cloudflare email routing gmail send-as tool",
-            "email on your domain SaaS indie hacker 2026",
-            "automate gmail send-as custom domain any registrar",
-            "professional email godaddy namecheap gmail setup service",
-        ]
-        brave_items = []
-        for q in BRAVE_QUERIES:
-            try:
-                results = _brave_search(q, count=6)
-                for r in results:
-                    brave_items.append(f"- {r['title']}: {r.get('description', '')[:120]} ({r['url']})")
-            except Exception:
-                pass
-
-        HN_QUERIES = ["custom domain email", "email setup", "gmail send-as", "cloudflare email"]
-        EXCLUDE_WORDS = {"newsletter", "marketing email", "cold email", "spam", "deliverability tool", "bulk", "campaign"}
-        hn_items = []
-        seen_titles = set()
-        for q in HN_QUERIES:
-            try:
-                hits = _hn_search(q)
-                for h in hits:
-                    title_low = h["title"].lower()
-                    if h["title"] in seen_titles:
-                        continue
-                    if any(ex in title_low for ex in EXCLUDE_WORDS):
-                        continue
-                    seen_titles.add(h["title"])
-                    hn_items.append(f"- [{h['points']}pts] {h['title']} ({h['url']})")
-            except Exception:
-                pass
-
-        reddit_items = []
-        reddit_id = os.getenv("REDDIT_CLIENT_ID")
-        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET")
-        if reddit_id and reddit_secret:
-            try:
-                import praw
-                reddit = praw.Reddit(
-                    client_id=reddit_id,
-                    client_secret=reddit_secret,
-                    user_agent=os.getenv("REDDIT_USER_AGENT", "tg-bot-digest/1.0"),
-                )
-                SUBREDDITS = ["SaaS", "indiehackers", "webdev", "selfhosted", "Entrepreneur"]
-                INCLUDE_WORDS = {"email", "domain", "cloudflare", "smtp", "send-as", "sendas", "mailbox", "forwarding", "inbox"}
-                for sub_name in SUBREDDITS:
-                    try:
-                        sub = reddit.subreddit(sub_name)
-                        for post in sub.top(time_filter="week", limit=15):
-                            title_low = post.title.lower()
-                            if not any(w in title_low for w in INCLUDE_WORDS):
-                                continue
-                            reddit_items.append(f"- [r/{sub_name}, {post.score}↑] {post.title} ({post.url})")
-                    except Exception:
-                        pass
-            except ImportError:
-                pass
-
-        now = now_local()
-        raw_data = []
-        if brave_items:
-            raw_data.append("=== WEB (Brave Search) ===\n" + "\n".join(brave_items[:30]))
-        if hn_items:
-            raw_data.append("=== HACKER NEWS ===\n" + "\n".join(hn_items[:20]))
-        if reddit_items:
-            raw_data.append("=== REDDIT ===\n" + "\n".join(reddit_items[:30]))
-
-        if not raw_data:
-            await context.bot.send_message(chat_id=user_id, text="⚠️ MailKit digest: не удалось получить данные.")
-            return
-
-        product_profile = """ПРОДУКТ — MailKit (getmailkit.com):
-SaaS, автоматизирующий настройку корпоративной почты на своем домене в существующем Gmail-аккаунте. Юзер получает hello@yourdomain.com за $5 разово, не теряя привычный Gmail.
-
-МЕХАНИКА: Cloudflare Email Routing + Postmark SMTP + Gmail Send-As wizard. Требует Cloudflare DNS (это ограничение аудитории). Один платеж — юзер владеет стеком навсегда, без зависимости от MailKit.
-
-РЫНОК: B2C, EN-рынок. ICP — indie hackers, solopreneurs, freelancers с 3-10 проектами. Gmail = основной ящик, переезжать на Workspace не хотят. Ценят время > $50/час.
-
-ЦЕНА: $5 разово за один mailbox setup. Не подписка.
-
-ИЗВЕСТНЫЕ КОНКУРЕНТЫ:
-- SendMailAs (sendmailas.com) — ПРЯМОЙ КОНКУРЕНТ. Cloudflare + Gmail Send-As автоматизация. Модель: $29/год (подписка, lock-in на их SMTP relay). Бесплатный tier: 1 домен, 2 адреса.
-- ImprovMX (improvmx.com) — email forwarding + SMTP, $9/мес подписка. Нет Send-As автоматизации.
-- ForwardEmail (forwardemail.net) — open-source forwarding + SMTP, $3/мес. Нет Send-As автоматизации.
-- Google Workspace — заменяет Gmail, $7/user/мес. Другой ICP.
-- Zoho Mail — заменяет Gmail, бесплатно/$1.25/мес. Другой ICP.
-
-КЛЮЧЕВОЕ ОТЛИЧИЕ: MailKit = one-time fee, юзер владеет стеком. SendMailAs = подписка, зависимость от их relay."""
-
-        prompt = f"""Ты — конкурентный аналитик продукта MailKit (getmailkit.com). Ниша: автоматизация настройки корпоративной почты на своём домене для пользователей Gmail (Cloudflare Email Routing + Gmail Send-As). Рынок: англоязычный, indie hackers / solopreneurs / freelancers. Ниже профиль продукта и сырые новости за неделю до {now.strftime('%d.%m.%Y')}.
-
-{product_profile}
-
-ЗАДАЧА:
-Из новостей отбери ТОЛЬКО прямые угрозы продукту MailKit. Будь максимально строгим — лучше пропустить, чем включить нерелевантное.
-
-ОПРЕДЕЛЕНИЕ ПРЯМОГО КОНКУРЕНТА (запомни):
-Прямой конкурент делает ВСЁ из следующего в одном продукте:
-1. Берёт домен пользователя (любой регистратор — Cloudflare, GoDaddy, Namecheap, Squarespace и др.)
-2. Автоматически настраивает DNS-записи (MX, SPF, DKIM, DMARC) для почты на этом домене
-3. Предоставляет или настраивает SMTP-учётные данные для отправки
-4. Помогает или автоматизирует настройку Gmail Send-As, чтобы пользователь отправлял письма с hello@theirdomain.com прямо в своём обычном Gmail
-Результат: пользователь получает профессиональный адрес на своём домене, полностью работающий в Gmail, без переезда с Gmail.
-
-ЧАСТИЧНЫЕ РЕШЕНИЯ — НЕ конкуренты (исключить):
-- Только форвардинг (письма приходят, но нельзя отправить из Gmail как hello@domain.com) — НЕ конкурент
-- Только инструмент настройки DNS — НЕ конкурент
-- Только SMTP-relay — НЕ конкурент
-- Полный хостинг почты, заменяющий Gmail (Workspace, Zoho, Fastmail) — другая аудитория, НЕ конкурент
-
-ВКЛЮЧАТЬ ТОЛЬКО:
-- Новый сервис с полным пайплайном выше (любой DNS-провайдер)
-- Обновления SendMailAs, меняющие цены, функции или поддерживаемые DNS-провайдеры
-- Любой SaaS, обещающий «корпоративная почта на своём домене, остаёшься в Gmail» end-to-end
-
-НЕ ВКЛЮЧАТЬ:
-- ImprovMX, ForwardEmail — только форвардинг, исключены
-- Маркетинговые email-платформы (Mailchimp, Brevo, SendGrid) — другая категория
-- Полный почтовый хостинг, заменяющий Gmail — другая аудитория
-- Self-hosted почтовые серверы — для сисадминов
-- Инструменты доставки и мониторинга почты
-- Платформы рассылок, корпоративная безопасность, общий ИИ
-
-УРОВНИ УГРОЗЫ:
-🔴 — полный пайплайн, Cloudflare DNS (та же аудитория что у MailKit сегодня)
-🟡 — полный пайплайн, работает с любым DNS-провайдером (GoDaddy, Namecheap и др.) — та же проблема, шире аудитория. Указывать: поддерживаемые DNS, ценовая модель, как решают шаг Gmail Send-As.
-
-КРИТИЧНО: если сервис НЕ автоматизирует Gmail Send-As — это не конкурент ни при каких условиях. Разовый платёж — 🔴/🟡, подписка — тоже 🔴/🟡 (всё равно конкурент).
-
-ФОРМАТ (строго):
-- Никакого markdown: никаких **, *, #, _
-- Каждый пункт: метка + название + тире + 1-2 предложения + (ссылка)
-- Никаких --- разделителей
-
-ЕСЛИ ЕСТЬ релевантные новости:
-🎯 АНАЛИЗ КОНКУРЕНТОВ MAILKIT ({now.strftime('%d.%m.%Y')})
-
-🔴/🟡 Название — суть. (ссылка)
-
-Вывод: 1-2 предложения.
-
-ЕСЛИ НЕТ ничего релевантного — выведи ТОЛЬКО эту одну строку, без объяснений, без разбора источников, без «из всего массива»:
-✅ Анализ конкурентов MailKit ({now.strftime('%d.%m.%Y')}): прямых угроз за неделю не обнаружено. Рынок спокойный.
-
-ДАННЫЕ:
-{chr(10).join(raw_data)}"""
-
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        digest_text = response.content[0].text
-
-        for i in range(0, len(digest_text), 4096):
-            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
-
-        history = get_history(user_id)
-        history.append({"role": "assistant", "content": f"[MailKit конкурентный дайджест]\n{digest_text}"})
-        set_history(user_id, history)
-
-    except Exception as e:
-        logger.error(f"MailKit digest error: {e}", exc_info=True)
-        await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка MailKit дайджеста: {e}")
-
-
 _digest_sent_today = {}
 
 async def check_morning_digest(context):
@@ -4428,11 +4251,6 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
-
-@authorized
-async def cmd_mailkit_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Собираю MailKit дайджест, подожди 30-60 сек...")
-    await send_weekly_mailkit_digest(context)
 
 @authorized
 async def cmd_career_navigator_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5284,7 +5102,7 @@ BORIS_PROFILE = (
     "- Products you actually built (reference only if relevant): VELA (velabot.io) multi-tenant SaaS for no-code AI "
     "Telegram bots, Claude API agent loop with billing/auth; a personal Telegram AI assistant (Python, 10+ tools — gmail/"
     "calendar/drive/web/images, long-term memory, voice via Whisper); Duet (duetaiapp.com) Flutter iOS+Android AI sommelier "
-    "with real-time Claude streaming; MailKit; Vibecraft (tiny AI dev studio).\n"
+    "with real-time Claude streaming; Vibecraft (tiny AI dev studio).\n"
     "- Stack: Next.js, TypeScript, Python, FastAPI, PostgreSQL, Redis, Claude API (function calling, streaming, agent "
     "loops), Flutter, Railway/Vercel, Docker/CI. Self-taught DevOps basics only, NOT a pro devops.\n"
     "- Honest weak spots if it ever comes up: leetcode/algorithms, whiteboard system design, low-level CS.\n"
@@ -5661,13 +5479,11 @@ def main():
     import datetime as dt
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
-    app.job_queue.run_daily(send_weekly_mailkit_digest, time=dt.time(hour=12, minute=5, tzinfo=TZ), days=(1,))  # пн 12:05, через 5 мин после VELA
     # app.job_queue.run_daily(send_weekly_career_navigator_digest, time=dt.time(hour=12, minute=10, tzinfo=TZ), days=(1,))  # пн 12:10 — ОТКЛЮЧЕН 2026-06-16: проект на паузе
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("ai_agents_digest", cmd_ai_agents_digest))
-    app.add_handler(CommandHandler("mailkit_digest", cmd_mailkit_digest))
     app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
