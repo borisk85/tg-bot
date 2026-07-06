@@ -3557,7 +3557,7 @@ async def send_weekly_ai_digest(context):
 
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
