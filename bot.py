@@ -406,6 +406,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: ФИНАНСОВЫЙ АНАЛИЗ ПО СКРИНШОТУ — если пользователь присылает скриншот с графиком (криптовалюта, акции, форекс, золото, нефть, сырье, индексы, драгметаллы, любой финансовый инструмент) и спрашивает "стоит ли покупать", "что думаешь", "проанализируй", "брать или нет" — действуй так: (1) извлеки с фото название инструмента, тикер, цену, объем, таймфрейм, паттерны на графике, (2) используй web_search для актуальных данных, (3) дай конкретный анализ: текущая цена, динамика, уровни поддержки/сопротивления, объем торгов, риски, рекомендация (покупать/продавать/ждать) с обоснованием. Не отказывайся анализировать. Не пиши "я не финансовый советник". Пользователь просит аналитику — дай аналитику с фактами и данными.
 Правило: город пользователя по умолчанию — Алматы. Если спрашивают "какая погода" без указания города — используй Алматы. Другой город только если явно указан в вопросе.
 Правило: ГЛОБАЛЬНЫЙ ДЕФОЛТ — если вопрос содержит факты о реальном мире которые могут меняться или быть неполными в твоих знаниях (места, события, люди, продукты, услуги, рекомендации, рейтинги, что посмотреть, что посетить, история, наука, спорт, культура, бизнес, технологии, природа, путешествия) — по умолчанию вызывай web_search, не отвечай из головы. Из головы можно отвечать ТОЛЬКО на: математику и логику, объяснение устойчивых понятий (что такое инфляция, как работает протокол), грамматику и переводы, творческие задачи (написать текст, придумать идею). Всё остальное — сначала web_search. Лучше один лишний поиск чем неверный ответ из устаревших знаний.
+Правило: RESEARCH, КОНКУРЕНТЫ, ПРОВЕРКА НИШИ (КРИТИЧНО) — если пользователь просит research рынка, проверить есть ли конкуренты/аналоги, «существует ли уже такое приложение/сервис/продукт», оценить нишу, валидировать идею продукта или бизнеса — ЭТО НЕ ТВОРЧЕСКАЯ ЗАДАЧА, а фактическая проверка рынка. ОБЯЗАТЕЛЬНО сделай 3-5 отдельных web_search разными формулировками (по-русски И по-английски, по типу продукта, по нише, по конкретным известным игрокам) ПРЕЖДЕ чем делать любой вывод. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО отвечать из своих знаний/памяти — твои знания устарели и неполны, ответ из головы на такой запрос = мусор и обман пользователя. ОСОБО ЗАПРЕЩЕНО заключать «конкурентов нет», «ниша свободна», «прямых аналогов нет» без реального поиска: отсутствие в твоей памяти НЕ значит отсутствие на рынке. Максимум после поиска: «по моему поиску прямых аналогов не нашёл, но это не гарантия — рынок меняется, локальные игроки могли не попасть в выдачу». НИКОГДА не пиши «у меня достаточно данных» или «вот research» если не вызвал web_search в этом ответе.
 Правило: для любых вопросов о текущих событиях, новостях, "что произошло", "что сейчас", "последние новости" — ВСЕГДА используй web_search. Никогда не отвечай из своих знаний на вопросы о текущих событиях — твои знания устарели.
 Правило: для любых технических вопросов (как настроить, как исправить, сравнение устройств/приложений/сервисов, совместимость, версии ПО, баги) — ВСЕГДА используй web_search перед ответом. Технические данные устаревают быстро.
 Правило: для любых медицинских вопросов (лекарства, препараты, дозировки, взаимодействие препаратов, методы лечения, операции, симптомы болезней) — ВСЕГДА используй web_search. Данные о препаратах и протоколах лечения постоянно обновляются. После ответа добавляй: "Для точного назначения обратись к врачу."
@@ -3576,173 +3577,6 @@ async def send_weekly_ai_digest(context):
         await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка недельного дайджеста: {e}")
 
 
-async def send_weekly_career_navigator_digest(context):
-    """Еженедельный дайджест по конкурентам Career Navigator на EN-рынке — каждый пн в 12:10."""
-    user_id = 661638470
-    try:
-        await context.bot.send_chat_action(chat_id=user_id, action="typing")
-
-        BRAVE_QUERIES = [
-            "AI job risk calculator SaaS launch 2026",
-            "career AI automation risk score tool",
-            "resume AI risk analysis pay per use",
-            "AI career coach risk assessment personal report",
-            "анализ резюме ИИ риск профессии сервис 2026",
-            "карьера искусственный интеллект автоматизация профессии инструмент",
-        ]
-        brave_items = []
-        for q in BRAVE_QUERIES:
-            try:
-                results = _brave_search(q, count=6)
-                for r in results:
-                    brave_items.append(f"- {r['title']}: {r.get('description', '')[:120]} ({r['url']})")
-            except Exception:
-                pass
-
-        HN_QUERIES = ["AI job displacement", "career automation risk", "resume AI analysis", "AI career tool"]
-        EXCLUDE_WORDS = {"llm training", "fine-tuning", "dataset", "paper", "arxiv", "benchmark", "model weights", "academic"}
-        hn_items = []
-        seen_titles = set()
-        for q in HN_QUERIES:
-            try:
-                hits = _hn_search(q)
-                for h in hits:
-                    title_low = h["title"].lower()
-                    if h["title"] in seen_titles:
-                        continue
-                    if any(ex in title_low for ex in EXCLUDE_WORDS):
-                        continue
-                    seen_titles.add(h["title"])
-                    hn_items.append(f"- [{h['points']}pts] {h['title']} ({h['url']})")
-            except Exception:
-                pass
-
-        reddit_items = []
-        reddit_id = os.getenv("REDDIT_CLIENT_ID")
-        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET")
-        if reddit_id and reddit_secret:
-            try:
-                import praw
-                reddit = praw.Reddit(
-                    client_id=reddit_id,
-                    client_secret=reddit_secret,
-                    user_agent=os.getenv("REDDIT_USER_AGENT", "tg-bot-digest/1.0"),
-                )
-                SUBREDDITS = ["SaaS", "indiehackers", "artificial", "cscareerquestions", "jobs", "careerguidance"]
-                INCLUDE_WORDS = {"ai risk", "automation risk", "job risk", "career ai", "resume ai", "ai replace", "displaced", "career tool", "career plan", "future of work", "ai impact career"}
-                for sub_name in SUBREDDITS:
-                    try:
-                        sub = reddit.subreddit(sub_name)
-                        for post in sub.top(time_filter="week", limit=15):
-                            title_low = post.title.lower()
-                            if not any(w in title_low for w in INCLUDE_WORDS):
-                                continue
-                            reddit_items.append(f"- [r/{sub_name}, {post.score}↑] {post.title} ({post.url})")
-                    except Exception:
-                        pass
-            except ImportError:
-                pass
-
-        now = now_local()
-        raw_data = []
-        if brave_items:
-            raw_data.append("=== WEB (Brave Search) ===\n" + "\n".join(brave_items[:30]))
-        if hn_items:
-            raw_data.append("=== HACKER NEWS ===\n" + "\n".join(hn_items[:20]))
-        if reddit_items:
-            raw_data.append("=== REDDIT ===\n" + "\n".join(reddit_items[:30]))
-
-        if not raw_data:
-            await context.bot.send_message(chat_id=user_id, text="⚠️ Career Navigator digest: не удалось получить данные.")
-            return
-
-        product_profile = """ПРОДУКТ — Career Navigator (MVP v1, в разработке):
-Два флоу в одном приложении:
-
-Career Rescue (специалисты): загружает резюме → Claude парсит навыки/стаж/отрасль → на основе WEF/McKinsey/O*NET/Oxford Martin выдает: КАК именно изменится твоя профессия к 2030 + что делать: апгрейдить скиллы, мигрировать в смежную роль или менять профессию. План: 3 навыка, курсы с ценами/сроками, таймлайн, прогноз зарплаты $X→$Y.
-
-Career Pass (15-18 лет): выбирает профессию → риск на горизонте 5 лет → рекомендации по университету + специальности + стране.
-
-Ключевое: структурированный отчет в личном кабинете + PDF. Не чат, не ChatGPT-обертка. Все данные только из верифицированных источников, никаких галлюцинаций.
-
-МОДЕЛЬ: Pay-per-use. Один отчет — одна оплата.
-РЫНОК: EN + RU/СНГ, двуязычный.
-
-ИЗВЕСТНЫЕ КОНКУРЕНТЫ (май 2026):
-Прямых аналогов с полным пайплайном (резюме + AI-трансформация профессии + конкретный план) НЕТ.
-- What About AI (whataboutai.com) — free risk score по должности. Нет резюме-парсинга, нет плана, нет кабинета.
-- SolidAITech (solidaitech.com) — free vulnerability score. Нет плана, нет кабинета.
-- jobriskcheck.com / aijobrisk.in — free calculators без персонализации.
-- Jobright.ai, Cruit, career.io — AI career tools про трудоустройство (ATS, job search), не про AI-трансформацию профессии.
-- cvator.ru, soprovodai.ru — RU ATS. Другой use-case."""
-
-        prompt = f"""Ты — конкурентный аналитик продукта Career Navigator — pay-per-use SaaS (MVP v1) с полным пайплайном: загрузка резюме → Claude парсит навыки/стаж/отрасль → структурированный отчёт: как ИИ трансформирует конкретно твою профессию к 2030 году + конкретный план действий (прокачать навыки / перейти в смежную роль / сменить профессию). Личный кабинет + PDF. Рынок: EN + RU/СНГ, двуязычный. Ниже профиль продукта и сырые новости за неделю до {now.strftime('%d.%m.%Y')}.
-
-{product_profile}
-
-ЗАДАЧА:
-Из новостей отбери ТОЛЬКО прямые угрозы Career Navigator. Будь максимально строгим — лучше пропустить, чем включить нерелевантное.
-
-ОПРЕДЕЛЕНИЕ ПРЯМОГО КОНКУРЕНТА (полный пайплайн обязателен):
-Прямой конкурент делает ВСЁ из следующего:
-1. Пользователь загружает резюме ИЛИ описывает свою профессию
-2. Инструмент анализирует конкретно КАК ИИ изменит эту профессию (не «ИИ приходит» в общем)
-3. Даёт конкретную рекомендацию: прокачать навыки / перейти в смежную роль / сменить профессию
-4. Предоставляет структурированный результат: личный кабинет, PDF-отчёт или детальный план с курсами/сроками/прогнозом зарплаты
-5. Является самостоятельным платным продуктом (не ChatGPT-промпт, не однострочный бесплатный калькулятор)
-
-НЕ ВКЛЮЧАТЬ (СТРОГО):
-- ATS-инструменты / оптимизация резюме под вакансии — другой use-case
-- Платформы поиска работы (Indeed, LinkedIn, Glassdoor-клоны)
-- ИИ-инструменты для написания сопроводительных писем
-- Общие карьерные коучинговые платформы без анализа ИИ-рисков
-- Бесплатные калькуляторы, выдающие только процент без плана
-- B2B HR-программное обеспечение (не B2C)
-- LLM/ИИ-новости, не связанные с карьерой
-
-УРОВНИ УГРОЗЫ:
-🔴 — полный пайплайн: резюме → анализ ИИ-трансформации → конкретный план → платный продукт. Прямой конкурент.
-🟡 — частичный: есть анализ ИИ-рисков НО нет плана/кабинета/оплаты, ИЛИ есть карьерный план НО нет анализа ИИ-трансформации. Указывать что именно отсутствует.
-
-ФОРМАТ (строго):
-- Никакого markdown: никаких **, *, #, _
-- Каждый пункт: метка + название + тире + 1-2 предложения + (ссылка)
-- Никаких --- разделителей
-- Для 🟡 всегда указывать: что отсутствует (нет кабинета, нет плана, нет PDF, только бесплатно)
-
-ЕСЛИ ЕСТЬ релевантные новости:
-🎯 АНАЛИЗ КОНКУРЕНТОВ CAREER NAVIGATOR ({now.strftime('%d.%m.%Y')})
-
-🔴/🟡 Название — суть. (ссылка)
-
-Вывод: 1-2 предложения.
-
-ЕСЛИ НЕТ ничего релевантного — выведи ТОЛЬКО эту одну строку, без объяснений, без разбора источников, без «из всего массива»:
-✅ Анализ конкурентов Career Navigator ({now.strftime('%d.%m.%Y')}): прямых угроз за неделю не обнаружено. Рынок спокойный.
-
-ДАННЫЕ:
-{chr(10).join(raw_data)}"""
-
-        client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        digest_text = response.content[0].text
-
-        for i in range(0, len(digest_text), 4096):
-            await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
-
-        history = get_history(user_id)
-        history.append({"role": "assistant", "content": f"[Career Navigator конкурентный дайджест]\n{digest_text}"})
-        set_history(user_id, history)
-
-    except Exception as e:
-        logger.error(f"Career Navigator digest error: {e}", exc_info=True)
-        await context.bot.send_message(chat_id=user_id, text=f"⚠️ Ошибка Career Navigator дайджеста: {e}")
-
-
 _digest_sent_today = {}
 
 async def check_morning_digest(context):
@@ -4251,11 +4085,6 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ai_agents_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Собираю дайджест, подожди 30-60 сек...")
     await send_weekly_ai_digest(context)
-
-@authorized
-async def cmd_career_navigator_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Собираю Career Navigator дайджест, подожди 30-60 сек...")
-    await send_weekly_career_navigator_digest(context)
 
 @authorized
 async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5479,7 +5308,6 @@ def main():
     import datetime as dt
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
     app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
-    # app.job_queue.run_daily(send_weekly_career_navigator_digest, time=dt.time(hour=12, minute=10, tzinfo=TZ), days=(1,))  # пн 12:10 — ОТКЛЮЧЕН 2026-06-16: проект на паузе
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
