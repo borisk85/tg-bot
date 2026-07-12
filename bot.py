@@ -1365,7 +1365,16 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             from email.mime.multipart import MIMEMultipart
             from email.mime.base import MIMEBase
             from email import encoders
+            import time as _t
             service = get_gmail_service()
+
+            # Дедуп: если ровно такое же письмо (кому/тема/текст) отправлено <120с назад —
+            # не дублируем. Защита от повторного вызова gmail_send за один прогон модели.
+            _sig = f"{tool_input.get('to','')}|{tool_input.get('subject','')}|{tool_input.get('body','')}"
+            if user_id:
+                _prev = _last_email_sent.get(user_id)
+                if _prev and _prev[0] == _sig and _t.time() - _prev[1] < 120:
+                    return "Это письмо только что было отправлено — не дублирую."
 
             # Проверяем есть ли вложения от пользователя (одно или список)
             raw_att = _pending_attachments.pop(user_id, None) if user_id else None
@@ -1424,6 +1433,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 thread = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="minimal").execute()
                 body["threadId"] = thread.get("threadId")
             service.users().messages().send(userId="me", body=body).execute()
+            if user_id:
+                _last_email_sent[user_id] = (_sig, _t.time())
             result = f"Письмо отправлено на {tool_input['to']}"
             result += f" от {from_email}." if from_email else "."
             if attachments:
@@ -4172,6 +4183,9 @@ _pending_attachments: dict = {}
 _pending_attachments_ts: dict = {}
 # Буфер фото для контекста Claude: {user_id: {"media_type", "data"}}
 _pending_photo: dict = {}
+# Дедуп отправленных писем: {user_id: (signature, ts)}. Модель иногда вызывает
+# gmail_send дважды за один прогон (напр. не подтвердив цель) — не шлём дубль.
+_last_email_sent: dict = {}
 
 async def _send_multi_album_reply(user_id: int):
     """Ждет 3с пока придут все альбомы, потом отвечает одним сообщением."""
