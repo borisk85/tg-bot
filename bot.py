@@ -593,13 +593,14 @@ TOOLS = [
     },
     {
         "name": "gmail_send",
-        "description": "Отправляет письмо. Если пользователь прислал файл и просит отправить письмо — вложение прикрепится автоматически.",
+        "description": "Отправляет письмо. Если пользователь прислал файл и просит отправить письмо — вложение прикрепится автоматически. Можешь отправить от имени подтверждённого псевдонима (Настройки Gmail → Аккаунты → «Отправлять письма как») через параметр from_email — например с hello@velabot.io вместо основного адреса.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "to": {"type": "string", "description": "Адрес получателя или несколько через запятую"},
                 "subject": {"type": "string", "description": "Тема письма"},
                 "body": {"type": "string", "description": "Текст письма"},
+                "from_email": {"type": "string", "description": "Отправить ОТ ИМЕНИ этого адреса. Должен быть подтверждённым псевдонимом в Gmail (Отправлять письма как). Если не указан — уйдёт с основного адреса аккаунта."},
                 "reply_to_id": {"type": "string", "description": "ID письма на которое отвечаем (необязательно)"}
             },
             "required": ["to", "subject", "body"]
@@ -1391,6 +1392,25 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             msg["to"] = tool_input["to"]
             msg["subject"] = tool_input["subject"]
 
+            # Отправка от имени псевдонима (Отправлять письма как). Проверяем что алиас
+            # реально подтверждён — иначе честно говорим правду, а не выдумываем ограничение.
+            from_email = (tool_input.get("from_email") or "").strip()
+            if from_email:
+                try:
+                    aliases = service.users().settings().sendAs().list(userId="me").execute().get("sendAs", [])
+                except Exception:
+                    aliases = []
+                usable = {a["sendAsEmail"].lower(): a for a in aliases
+                          if a.get("isPrimary") or a.get("verificationStatus") == "accepted"}
+                if from_email.lower() in usable:
+                    display = usable[from_email.lower()].get("displayName")
+                    msg["from"] = f'{display} <{from_email}>' if display else from_email
+                else:
+                    verified = ", ".join(sorted(usable.keys())) or "нет ни одного подтверждённого"
+                    return (f"Не могу отправить от {from_email} — этот адрес не подтверждён как псевдоним "
+                            f"в Gmail (Настройки → Аккаунты → Отправлять письма как). "
+                            f"Подтверждённые адреса: {verified}.")
+
             if tool_input.get("reply_to_id"):
                 original = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="metadata",
                     metadataHeaders=["Message-ID", "Subject"]).execute()
@@ -1404,7 +1424,8 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
                 thread = service.users().messages().get(userId="me", id=tool_input["reply_to_id"], format="minimal").execute()
                 body["threadId"] = thread.get("threadId")
             service.users().messages().send(userId="me", body=body).execute()
-            result = f"Письмо отправлено на {tool_input['to']}."
+            result = f"Письмо отправлено на {tool_input['to']}"
+            result += f" от {from_email}." if from_email else "."
             if attachments:
                 names = ", ".join(a["filename"] for a in attachments)
                 result += f" Вложения: {names}."
