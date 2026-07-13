@@ -4821,7 +4821,7 @@ def _reddit_worthy(title, body):
         return False
     try:
         resp = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5-20251001",  # классификация yes/no — Haiku по логике VELA (13.07, чтоб не жрать Sonnet на простом)
             max_tokens=5,
             system=(
                 "You filter Reddit posts for a solo AI-native founder. He wants posts where a comment actually ADDS "
