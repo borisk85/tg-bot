@@ -481,7 +481,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Команды бота:
 /clear — очистить историю
 /myid — Telegram ID
-/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram (СНГ + мир/EN) прямо сейчас (каждый пн в 12:00 приходит автоматически)"""
+/ai_agents_digest — запустить дайджест по личным ИИ-ассистентам в Telegram (СНГ + мир/EN) прямо сейчас"""
 
 # ── Weather helpers ───────────────────────────────────────────────────────────
 
@@ -5343,7 +5343,8 @@ def main():
     app.job_queue.run_repeating(check_price_alerts, interval=300, first=30)
     import datetime as dt
     app.job_queue.run_repeating(check_morning_digest, interval=60, first=15)
-    app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
+    # Авто-вывод недельного дайджеста по пн отключен (Boris, 13.07.2026). Запуск вручную: /ai_agents_digest
+    # app.job_queue.run_daily(send_weekly_ai_digest, time=dt.time(hour=12, minute=0, tzinfo=TZ), days=(1,))  # 1=пн (0=вс в ptb)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("myid", cmd_myid))
