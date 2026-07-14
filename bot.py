@@ -821,6 +821,21 @@ TOOLS = [
         }
     },
     {
+        "name": "reminder_reschedule",
+        "description": "ПЕРЕНОСИТ существующее напоминание на новое время (НЕ отменяет и НЕ создает заново). Поиск того же напоминания: time (HH:MM), text (часть текста) или index. Новое время: delay_minutes — сдвиг от текущего (вперед +30, назад -15); new_time='18:00' — новое время того же дня; new_datetime='+2h'/'+1d' или дата YYYY-MM-DDTHH:MM для другого дня (в т.ч. раньше, напр. со среды на понедельник). ВСЕГДА используй этот инструмент для переноса, а не cancel+set. Повтор (repeat) сохраняется.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "Номер из reminder_list"},
+                "text": {"type": "string", "description": "Часть текста напоминания для поиска"},
+                "time": {"type": "string", "description": "Текущее время срабатывания (HH:MM) для поиска"},
+                "delay_minutes": {"type": "integer", "description": "Сдвиг от текущего времени. Вперед положительное ('на 30 мин позже' → 30), назад отрицательное ('на 15 мин раньше' → -15)"},
+                "new_time": {"type": "string", "description": "Новое время HH:MM того же дня. 'перенеси на 18:00' → '18:00'"},
+                "new_datetime": {"type": "string", "description": "Для другого дня/даты: '+2h'/'+1d' или точная дата YYYY-MM-DDTHH:MM (вычисли из дня недели). Можно раньше, главное чтобы в будущем."}
+            }
+        }
+    },
+    {
         "name": "memory_save",
         "description": "Сохраняет важный факт о пользователе в долгосрочную память (хранится навсегда). Используй когда пользователь сообщает: адреса контрактов, тикеры которые он следит, предпочтения, имена, города, важные числа, любые данные которые стоит помнить в следующих сессиях.",
         "input_schema": {
@@ -1883,6 +1898,63 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             reminders[real_idx]["done"] = True
             save_reminders(user_id, reminders)
             return f"Напоминание отменено: {r['text']}"
+        except Exception as e:
+            return f"Ошибка: {e}"
+
+    if name == "reminder_reschedule":
+        try:
+            from datetime import timedelta
+            reminders = get_reminders(user_id)
+            active = [(i, r) for i, r in enumerate(reminders) if not r.get("done")]
+            if not active:
+                return "Активных напоминаний нет."
+            user_tz = get_user_tz(user_id)
+            now = datetime.now(user_tz)
+            real_idx, r = None, None
+            if tool_input.get("time"):
+                st = tool_input["time"]
+                for i, rem in active:
+                    rd = datetime.fromisoformat(rem["at"]).astimezone(user_tz)
+                    if st in (rd.strftime("%H:%M"), rd.strftime("%Y-%m-%dT%H:%M")):
+                        real_idx, r = i, rem
+                        break
+            elif tool_input.get("text"):
+                s = tool_input["text"].lower()
+                for i, rem in active:
+                    if s in rem["text"].lower():
+                        real_idx, r = i, rem
+                        break
+            elif "index" in tool_input:
+                idx = tool_input["index"] - 1
+                if 0 <= idx < len(active):
+                    real_idx, r = active[idx]
+            if real_idx is None:
+                return "Напоминание не найдено. Проверь список: /reminders"
+            old_dt = datetime.fromisoformat(reminders[real_idx]["at"]).astimezone(user_tz)
+            if tool_input.get("delay_minutes") is not None:
+                new_dt = old_dt + timedelta(minutes=int(tool_input["delay_minutes"]))
+            elif tool_input.get("new_datetime"):
+                nd = tool_input["new_datetime"].strip()
+                m2 = re.match(r'\+(\d+)([mhd])', nd)
+                if m2:
+                    val, unit = int(m2.group(1)), m2.group(2)
+                    new_dt = now + {"m": timedelta(minutes=val), "h": timedelta(hours=val), "d": timedelta(days=val)}[unit]
+                else:
+                    new_dt = user_tz.localize(datetime.fromisoformat(nd))
+            elif tool_input.get("new_time"):
+                t = datetime.strptime(tool_input["new_time"], "%H:%M")
+                new_dt = old_dt.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+                if new_dt <= now:
+                    new_dt += timedelta(days=1)
+            else:
+                return "Укажи новое время: на сколько перенести, новое время ЧЧ:ММ или дату."
+            if new_dt <= now:
+                return "Новое время уже в прошлом, укажи будущее."
+            if new_dt > now + timedelta(days=366):
+                return "Так далеко перенести нельзя, максимум на год вперед."
+            reminders[real_idx]["at"] = new_dt.isoformat()
+            save_reminders(user_id, reminders)
+            return f"Напоминание перенесено на {new_dt.strftime('%d.%m.%Y %H:%M')}: {reminders[real_idx]['text']}"
         except Exception as e:
             return f"Ошибка: {e}"
 
