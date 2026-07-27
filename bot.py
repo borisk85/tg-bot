@@ -4416,10 +4416,30 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @authorized
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Принимает голосовое сообщение, транскрибирует через Groq Whisper и передает в run_agent."""
+    """Принимает голосовое/аудио сообщение, транскрибирует через Groq Whisper и передает в run_agent.
+
+    Ловит не только штатное голосовое Telegram (voice), но и аудиофайл (audio),
+    видео-кружок (video_note) и аудио, присланное документом: пересылка голосового
+    из WhatsApp приходит в Telegram как audio/document, а не как voice.
+    """
     try:
         await context.bot.send_chat_action(update.effective_chat.id, action="typing")
-        tg_file = await context.bot.get_file(update.message.voice.file_id)
+        _msg = update.message
+        media = _msg.voice or _msg.audio or _msg.video_note or _msg.document
+        if media is None:
+            return
+        # Имя файла с реальным расширением — Whisper определяет формат по нему
+        _src_name = getattr(media, "file_name", None) or ""
+        _ext = os.path.splitext(_src_name)[1].lower()
+        if not _ext:
+            _mime_ext = {
+                "audio/ogg": ".ogg", "audio/opus": ".ogg", "audio/mpeg": ".mp3",
+                "audio/mp3": ".mp3", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",
+                "audio/aac": ".m4a", "audio/wav": ".wav", "audio/x-wav": ".wav",
+                "audio/webm": ".webm", "audio/flac": ".flac", "video/mp4": ".mp4",
+            }
+            _ext = _mime_ext.get((getattr(media, "mime_type", None) or "").lower(), ".ogg")
+        tg_file = await context.bot.get_file(media.file_id)
         voice_bytes = await tg_file.download_as_bytearray()
 
         groq_key = os.getenv("GROQ_API_KEY")
@@ -4431,7 +4451,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import io as _io
         groq_client = GroqClient(api_key=groq_key)
         audio_file = _io.BytesIO(bytes(voice_bytes))
-        audio_file.name = "voice.ogg"
+        audio_file.name = f"voice{_ext}"
         transcription = groq_client.audio.transcriptions.create(
             model="whisper-large-v3",
             file=audio_file,
@@ -4703,6 +4723,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fname = update.message.document.file_name or "file"
         if upload_to_drive:
             await _upload_to_drive(bytes(file_bytes), fname, mime, update, context)
+            return
+        # Аудио, присланное документом (частый случай — пересылка голосового из
+        # WhatsApp): это звук, а не файл на анализ — отдаем в транскрибацию
+        if mime.startswith("audio/"):
+            await handle_voice(update, context)
             return
         # Whitelist поддерживаемых форматов
         _SUPPORTED_DOC_MIMES = {
@@ -5431,7 +5456,7 @@ def main():
     app.add_handler(CommandHandler("en", cmd_en))
     app.add_handler(CommandHandler("ru", cmd_ru))
     app.add_handler(InlineQueryHandler(handle_inline_query))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_voice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_message))
 
