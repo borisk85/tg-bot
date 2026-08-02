@@ -5553,7 +5553,7 @@ def _strip_agreement_opener(text):
 
 
 async def _rc_generate(update, pain, image_data=None):
-    """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Sonnet. Без рекламы, без LLM-щины."""
+    """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Opus. Без рекламы, без LLM-щины."""
     await update.message.reply_text("Пишу коммент...")
     try:
         if image_data:
@@ -5561,7 +5561,7 @@ async def _rc_generate(update, pain, image_data=None):
             if _d:
                 pain = (pain + "\n\n[Image attached to the thread, described]: " + _d).strip()
         resp = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-8",
             max_tokens=1500,
             tools=[_WEB_SEARCH_TOOL],
             system=(
