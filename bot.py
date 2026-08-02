@@ -96,6 +96,131 @@ def _format_when_human(trigger_dt, now) -> str:
         return f"послезавтра в {time_str}"
     return f"{trigger_dt.day} {_MONTHS_RU[trigger_dt.month - 1]} в {time_str}"
 
+# ── Блокнот ───────────────────────────────────────────────────────────────────
+# Заметка это короткая запись, а не документ: 300 знаков это примерно три
+# предложения. Потолок держит список читаемым (та же логика, что в VELA)
+MAX_NOTE_LEN = 300
+MAX_NOTES_LIST_CHARS = 3800
+
+
+def get_notes(user_id: int) -> list:
+    if redis_client:
+        data = redis_client.get(f"notes:{user_id}")
+        return json.loads(data) if data else []
+    return []
+
+
+def save_notes(user_id: int, notes: list):
+    if redis_client:
+        redis_client.set(f"notes:{user_id}", json.dumps(notes, ensure_ascii=False))
+
+
+def note_add(user_id: int, text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return "Текст заметки пустой. Скажи, что записать."
+    if len(text) > MAX_NOTE_LEN:
+        return (f"Заметка длинная: {len(text)} знаков, в блокнот помещается {MAX_NOTE_LEN}. "
+                "Скажи короче или разбей на несколько.")
+    notes = get_notes(user_id)
+    notes.append({"text": text, "created_at": datetime.now(get_user_tz(user_id)).isoformat()})
+    save_notes(user_id, notes)
+    return f"Записал. Заметок в блокноте: {len(notes)}."
+
+
+def note_list_text(user_id: int) -> str:
+    notes = get_notes(user_id)
+    if not notes:
+        return "Блокнот пуст."
+    lines = ["Твои заметки:\n"]
+    used = len(lines[0])
+    shown = 0
+    for i, n in enumerate(notes, 1):
+        date = ""
+        try:
+            date = datetime.fromisoformat(n.get("created_at", "")).strftime("%d.%m")
+        except Exception:
+            pass
+        line = f"{i}. {n['text']}" + (f" ({date})" if date else "")
+        if used + len(line) > MAX_NOTES_LIST_CHARS:
+            lines.append(f"\nЕще {len(notes) - shown} в блокноте. Удали лишние, чтобы увидеть все.")
+            break
+        lines.append(line)
+        used += len(line) + 1
+        shown += 1
+    return "\n".join(lines)
+
+
+def note_remove(user_id: int, index=None, text=None, indexes=None, texts=None, all=False) -> str:
+    notes = get_notes(user_id)
+    if not notes:
+        return "Блокнот пуст, удалять нечего."
+
+    if all:
+        save_notes(user_id, [])
+        return f"Блокнот очищен, удалено заметок: {len(notes)}."
+
+    # Пакет: «удали 1 и 3», «выполнил про молоко и хлеб»
+    if indexes or texts:
+        done, missed, targets = [], [], []
+        for raw in (indexes or []):
+            try:
+                i = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= i <= len(notes):
+                targets.append(notes[i - 1])
+            else:
+                missed.append(str(raw))
+        for needle in (texts or []):
+            found = [n for n in notes if needle.strip().lower() in n["text"].lower()]
+            if found:
+                targets.append(found[0])
+            else:
+                missed.append(needle)
+        keep, seen = [], []
+        for n in notes:
+            if any(n is t for t in targets) and not any(n is s for s in seen):
+                seen.append(n)
+                done.append(n["text"])
+                continue
+            keep.append(n)
+        save_notes(user_id, keep)
+        out = []
+        if done:
+            out.append("Удалил из блокнота:")
+            out.extend(f"{i}. {t}" for i, t in enumerate(done, 1))
+        if missed:
+            out.append("Не нашел: " + ", ".join(missed))
+        return "\n".join(out) if out else "Не нашел таких заметок. Проверь список: /notes"
+
+    target = None
+    if index is not None:
+        try:
+            idx = int(index)
+        except (TypeError, ValueError):
+            idx = 0
+        if idx < 1 or idx > len(notes):
+            return "Неверный номер заметки."
+        target = notes[idx - 1]
+    elif text:
+        needle = text.strip().lower()
+        matches = [n for n in notes if needle in n["text"].lower()]
+        if not matches:
+            return f"Заметка «{text}» не найдена. Проверь список: /notes"
+        if len(matches) > 1:
+            out = ["Таких заметок несколько, скажи номер:"]
+            out.extend(f"{notes.index(n) + 1}. {n['text']}" for n in matches)
+            return "\n".join(out)
+        target = matches[0]
+    else:
+        return "Укажи номер или текст заметки."
+
+    notes = [n for n in notes if n is not target]
+    save_notes(user_id, notes)
+    return f"Заметка удалена: {target['text']}"
+
+
 def get_price_alerts(user_id: int) -> list:
     if redis_client:
         data = redis_client.get(f"price_alerts:{user_id}")
@@ -230,6 +355,56 @@ def set_digest_section(user_id: int, section: str, enabled: bool):
     sections[section] = enabled
     if redis_client:
         redis_client.set(f"digest_sections:{user_id}", json.dumps(sections))
+
+def sanitize_tool_pairs(messages: list) -> list:
+    """Выкидывает осиротевшие tool_use / tool_result блоки.
+
+    Пара «вызов инструмента → его результат» рвется при обрезке окна истории
+    и при обрыве цикла на max_tokens. Anthropic API отвечает на половину пары
+    ошибкой 400, и бот перестает отвечать до ручной очистки истории."""
+    use_ids, result_ids = set(), set()
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("id"):
+                use_ids.add(block["id"])
+            elif block.get("type") == "tool_result" and block.get("tool_use_id"):
+                result_ids.add(block["tool_use_id"])
+
+    orphan_use = use_ids - result_ids
+    orphan_result = result_ids - use_ids
+    if not orphan_use and not orphan_result:
+        cleaned = list(messages)
+    else:
+        cleaned = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                cleaned.append(msg)
+                continue
+            kept = [
+                b for b in content
+                if not (
+                    isinstance(b, dict)
+                    and (
+                        (b.get("type") == "tool_use" and b.get("id") in orphan_use)
+                        or (b.get("type") == "tool_result" and b.get("tool_use_id") in orphan_result)
+                    )
+                )
+            ]
+            if not kept:
+                continue
+            cleaned.append({**msg, "content": kept})
+
+    # История обязана начинаться с сообщения пользователя
+    while cleaned and cleaned[0].get("role") != "user":
+        cleaned.pop(0)
+    return cleaned
+
 
 def serialize_messages(messages: list) -> list:
     """Конвертирует объекты Anthropic SDK в plain dict для JSON-сериализации."""
@@ -392,6 +567,7 @@ SYSTEM_PROMPT = """Ты — личный ИИ-агент. Умный, кратк
 Правило: МНОГОШАГОВЫЕ КОМАНДЫ — если пользователь просит несколько действий в одном сообщении ("удали X и создай Y", "убери одно и оставь другое") — выполни КАЖДОЕ действие отдельным вызовом инструмента. Нельзя выполнить одно и промолчать о втором. Нельзя сказать "готово" если выполнена только часть. Пример: "удали напоминание в 10 утра, оставь в 13:00" = вызов reminder_cancel для 10:00. Без вызова reminder_cancel — ЗАПРЕЩЕНО отвечать что удалил.
 Правило: при извлечении текста со скриншота или фото — ВСЕГДА сохраняй эмодзи которые видны на изображении. Не пропускай их. Лимит 1-2 эмодзи на ответ НЕ распространяется на эмодзи извлеченные с фото.
 Правило: никогда не упоминай и не воспроизводи URL-адреса, которые видишь на скриншотах или референс-фото. Эти ссылки — часть примера, не информация для передачи пользователю.
+Правило: БЛОКНОТ И ЗАДАЧИ — это разные места, не путай. Блокнот (note_save / note_list / note_delete) для коротких записей самому себе: списки покупок, мысли, идеи, «запиши на потом». Google Tasks (task_create) для дел, которые надо ВЫПОЛНИТЬ, особенно со сроком. «Запиши купить молоко» → блокнот. «Напомни завтра купить молоко» → напоминание. «Поставь задачу отправить отчет до пятницы» → Google Tasks. Если из фразы непонятно, куда именно, спроси одним коротким вопросом.
 Правило: не придумывай ограничения инструментов — если задача выполнима (создать SVG, сохранить файл), делай без оговорок. Если данные уже есть в истории диалога — используй их, не проси снова.
 
 Правило: если в сообщении пользователя есть [image_url:...] — это URL загруженного фото. Используй его в edit_image как image_url. КРИТИЧНО для промпта: FLUX img2img требует ПОЛНОЕ описание сцены + стиль. Сначала опиши что на фото (людей, фон, одежду), потом добавь стиль. Пример: "young Asian woman holding baby in carrier, indoor, cinematic film still, dramatic moody lighting, golden hour, 8k" — НЕ просто "cinematic style". Промпт всегда на английском.
@@ -861,6 +1037,45 @@ TOOLS = [
                 "key": {"type": "string", "description": "Ключ факта для удаления"}
             },
             "required": ["key"]
+        }
+    },
+    {
+        "name": "note_save",
+        "description": (
+            "Записывает короткую заметку в блокнот. Используй когда пользователь говорит: 'запиши', "
+            "'заметка', 'запомни на потом', 'в блокнот', 'сохрани мысль', диктует список покупок или "
+            "короткую идею. Блокнот — для быстрых записей самому себе. Если запись это ЗАДАЧА со сроком "
+            "или делом, которое надо выполнить, используй Google Tasks (task_create), а не блокнот."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Текст заметки, до 300 знаков"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "note_list",
+        "description": "Показывает все заметки из блокнота с номерами. Используй на просьбы 'мои заметки', 'что в блокноте', 'покажи записи'.",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "note_delete",
+        "description": (
+            "Удаляет заметки из блокнота: по номеру, по тексту, пачкой или все сразу. "
+            "Используй на 'удали вторую заметку', 'убери про молоко', 'удали 1 и 3', 'очисти блокнот'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "Номер заметки из списка (с единицы)"},
+                "text": {"type": "string", "description": "Кусок текста заметки для поиска"},
+                "indexes": {"type": "array", "items": {"type": "integer"}, "description": "Несколько номеров сразу"},
+                "texts": {"type": "array", "items": {"type": "string"}, "description": "Несколько кусков текста сразу"},
+                "all": {"type": "boolean", "description": "true — очистить блокнот полностью"}
+            },
+            "required": []
         }
     },
     {
@@ -2041,6 +2256,22 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             return f"Ключ '{key}' не найден в памяти."
         save_user_memory(user_id, new_memories)
         return f"Удалил из памяти: {key}"
+
+    if name == "note_save":
+        return note_add(user_id, tool_input.get("text", ""))
+
+    if name == "note_list":
+        return note_list_text(user_id)
+
+    if name == "note_delete":
+        return note_remove(
+            user_id,
+            index=tool_input.get("index"),
+            text=tool_input.get("text"),
+            indexes=tool_input.get("indexes"),
+            texts=tool_input.get("texts"),
+            all=bool(tool_input.get("all")),
+        )
 
     if name == "morning_digest_toggle":
         enabled = bool(tool_input.get("enabled"))
@@ -3334,16 +3565,10 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
 
     if len(history) > 60:
         history = history[-60:]
-        # Убираем осиротевшие tool_result в начале истории:
-        # если первое сообщение — user с tool_result блоками без предшествующего tool_use
-        while history and history[0]["role"] == "user":
-            content = history[0]["content"]
-            if isinstance(content, list) and any(
-                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
-            ):
-                history = history[1:]  # убираем осиротевший tool_result
-            else:
-                break
+    # Чистим разорванные пары tool_use/tool_result: обрезка окна или обрыв цикла
+    # по max_tokens оставляют половину пары, API отвечает на нее 400 — и бот
+    # отдает ошибку на каждое следующее сообщение, пока история не сброшена
+    history = sanitize_tool_pairs(history)
 
     messages = list(history)
     user_tz = get_user_tz(user_id)
@@ -4124,6 +4349,10 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("История очищена.")
 
 @authorized
+async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(note_list_text(update.effective_user.id))
+
+
 async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     reminders = get_reminders(user_id)
@@ -5324,7 +5553,7 @@ def _strip_agreement_opener(text):
 
 
 async def _rc_generate(update, pain, image_data=None):
-    """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Opus. Без рекламы, без LLM-щины."""
+    """Reddit-коммент, шаг 2: текст (+ фото через Sonnet-описание) → Sonnet. Без рекламы, без LLM-щины."""
     await update.message.reply_text("Пишу коммент...")
     try:
         if image_data:
@@ -5332,7 +5561,7 @@ async def _rc_generate(update, pain, image_data=None):
             if _d:
                 pain = (pain + "\n\n[Image attached to the thread, described]: " + _d).strip()
         resp = anthropic.messages.create(
-            model="claude-opus-4-8",
+            model="claude-sonnet-4-6",
             max_tokens=1500,
             tools=[_WEB_SEARCH_TOOL],
             system=(
@@ -5450,6 +5679,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("about", cmd_about))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("notes", cmd_notes))
     app.add_handler(CommandHandler("reddit", cmd_reddit))
     app.add_handler(CommandHandler("rc", cmd_rc))
     # /rp убран — Reddit-постинг теперь в маркет-боте через /post (ветка 5)
