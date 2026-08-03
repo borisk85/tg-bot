@@ -4178,6 +4178,8 @@ START_RU = (
     "— поиск, чтение, создание страниц и записей в базах данных\n\n"
     "⏰ Напоминания\n"
     "— напомнить о чем-либо в нужное время\n\n"
+    "🗒 Блокнот\n"
+    "— короткие заметки: записать, показать, удалить\n\n"
     "🔔 Ценовые уведомления\n"
     "— напомнить, когда нужный актив достигнет определенной цены\n\n"
     "💱 Криптовалюты и валюты\n"
@@ -4228,6 +4230,8 @@ START_EN = (
     "— search, read, create pages and database entries\n\n"
     "⏰ Reminders\n"
     "— remind you of anything at the right time\n\n"
+    "🗒 Notepad\n"
+    "— short notes: save, list, delete\n\n"
     "🔔 Price alerts\n"
     "— notify you when an asset hits a target price\n\n"
     "💱 Crypto and currencies\n"
@@ -4303,6 +4307,7 @@ _MENU_CMDS_RU = [
     ("memory", "Что бот знает обо мне"),
     ("about", "Рассказать о себе"),
     ("reminders", "Активные напоминания"),
+    ("notes", "Заметки в блокноте"),
     ("reddit", "Свежие треды Reddit с болью под коммент"),
     ("rc", "Reddit-коммент по треду (текст + фото)"),
     ("en", "Меню на английском"),
@@ -4316,6 +4321,7 @@ _MENU_CMDS_EN = [
     ("memory", "What the bot knows about me"),
     ("about", "Tell about yourself"),
     ("reminders", "Active reminders"),
+    ("notes", "Notes in the notepad"),
     ("reddit", "Fresh Reddit threads with pain to comment on"),
     ("rc", "Reddit comment by thread (text + photo)"),
     ("en", "Switch menu to English"),
