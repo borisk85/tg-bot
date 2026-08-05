@@ -3574,23 +3574,34 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
     user_tz = get_user_tz(user_id)
     now = datetime.now(user_tz)
     days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
-    system = SYSTEM_PROMPT.format(
-        datetime=f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')} ({user_tz.zone})"
-    )
-    # Добавляем долгосрочную память в системный промпт
+    # Статичная часть промпта кешируется на час, поэтому дата и память вынесены
+    # во второй блок: раньше время с точностью до минуты стояло внутри промпта и
+    # каждый запрос платил все 10 897 токенов по полной цене вместо чтения кеша.
+    _now_str = f"{now.strftime('%d.%m.%Y')}, {days[now.weekday()]}, {now.strftime('%H:%M')} ({user_tz.zone})"
+    _static = SYSTEM_PROMPT.format(datetime="указаны ниже")
+    _dynamic = f"Текущая дата и время: {_now_str}"
     memories = get_user_memory(user_id)
     if memories:
         memory_lines = "\n".join(f"• {m['key']}: {m['value']}" for m in memories)
-        system += f"\n\nДолгосрочная память о пользователе (факты из прошлых сессий):\n{memory_lines}"
+        _dynamic += f"\n\nДолгосрочная память о пользователе (факты из прошлых сессий):\n{memory_lines}"
+    system = [
+        {"type": "text", "text": _static, "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        {"type": "text", "text": _dynamic},
+    ]
 
     last_tool_result = ""
 
     for _ in range(10):
+        _tools = list(TOOLS)
+        if _tools:
+            _last = dict(_tools[-1])
+            _last["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+            _tools[-1] = _last
         response = anthropic.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=4096,
             system=system,
-            tools=TOOLS,
+            tools=_tools,
             messages=messages
         )
 
