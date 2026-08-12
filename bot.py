@@ -4933,7 +4933,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Иначе агент сам начинал расписывать содержимое сайта, хотя задачи не ставили.
     if (not update.message.photo and not update.message.document
             and not reply_to and _is_bare_link(user_text)):
-        _reply = "🔗 Ссылку получил. Что сделать?\n— Пересказать\n— Сохранить в блокнот\n— Отправить на email"
+        _reply = "🔗 Ссылка получена. Что сделать?\n— Пересказать\n— Сохранить в блокнот\n— Отправить на email"
         _hist = get_history(user_id)
         _hist.append({"role": "user", "content": user_text})
         _hist.append({"role": "assistant", "content": _reply})
