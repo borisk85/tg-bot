@@ -4534,6 +4534,23 @@ _pending_attachments: dict = {}
 _pending_attachments_ts: dict = {}
 # Буфер фото для контекста Claude: {user_id: {"media_type", "data"}}
 _pending_photo: dict = {}
+# Время попадания фото в буфер: {user_id: float}. Без срока годности фото висело
+# сутками и подхватывалось к следующему сообщению совсем на другую тему (30.08.2026)
+_pending_photo_ts: dict = {}
+_PENDING_PHOTO_TTL = 300
+
+
+def _take_pending_photo(user_id: int):
+    """Отдает висящее фото, если оно свежее. Протухшее выбрасывает."""
+    import time as _t
+    if user_id not in _pending_photo:
+        return None
+    if _t.time() - _pending_photo_ts.get(user_id, 0) > _PENDING_PHOTO_TTL:
+        _pending_photo.pop(user_id, None)
+        _pending_photo_ts.pop(user_id, None)
+        return None
+    _pending_photo_ts.pop(user_id, None)
+    return _pending_photo.pop(user_id)
 # Дедуп отправленных писем: {user_id: (signature, ts)}. Модель иногда вызывает
 # gmail_send дважды за один прогон (напр. не подтвердив цель) — не шлём дубль.
 _last_email_sent: dict = {}
@@ -4811,8 +4828,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 image_data = {"media_type": pending["mime"], "data": _b64.b64encode(pending["bytes"]).decode()}
 
         # Подхватить фото из _pending_photo если image_data всё ещё None
-        if image_data is None and user_id in _pending_photo:
-            image_data = _pending_photo.pop(user_id)
+        if image_data is None:
+            image_data = _take_pending_photo(user_id)
 
         async def send_photo(url: str, tip=None):
             img_bytes = await asyncio.to_thread(lambda: requests.get(url, timeout=30).content)
@@ -5004,6 +5021,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Фото без подписи — сохраняем для контекста следующего сообщения
         if not user_text:
             _pending_photo[user_id] = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
+            _pending_photo_ts[user_id] = _time.time()
             await update.message.reply_text("📎 Фото получено. Что сделать?")
             return
         image_data = {"media_type": "image/jpeg", "data": base64.b64encode(file_bytes).decode()}
@@ -5069,8 +5087,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_text = f"[Файл: {fname}] {user_text}".strip()
 
     # Подхватить фото из буфера если текущее сообщение без фото
-    if not image_data and user_id in _pending_photo:
-        image_data = _pending_photo.pop(user_id)
+    if not image_data:
+        image_data = _take_pending_photo(user_id)
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
