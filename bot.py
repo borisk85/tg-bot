@@ -17,6 +17,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, InlineQuer
 import re
 import html
 import threading
+import time
 import requests
 import redis
 from google.oauth2.credentials import Credentials
@@ -4530,6 +4531,10 @@ _multi_album_buffer: dict = {}
 
 # Буфер вложений для Gmail: {user_id: {bytes, filename, mime}}
 _pending_attachments: dict = {}
+# Просьба про аудио, ждущая голосового следом (см. handle_message и handle_voice)
+_media_wait: dict = {}
+_media_wait_skip: set = set()
+_MEDIA_ASK_RE = re.compile(r"(транскриб|расшифр|голосов|аудио|кружок|в текст|перескажи|о чем (оно|тут|там)|переведи)")
 # Timestamp последнего добавления фото в буфер: {user_id: float}
 _pending_attachments_ts: dict = {}
 # Буфер фото для контекста Claude: {user_id: {"media_type", "data"}}
@@ -4783,13 +4788,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Voice transcribed for user {user_id}: {transcript[:80]}")
 
+        # Голосовое пришло следом за просьбой про него: забираем просьбу себе
+        _ask = None
+        _w = _media_wait.get(user_id)
+        if _w and not _w["taken"] and time.time() - _w["ts"] < 10:
+            _w["taken"] = True
+            _ask = _w["text"].strip()
+        # «транскрибируй / расшифруй / в текст» это ровно то, что бот и так делает с
+        # пересланным голосовым; любая другая просьба (переведи, перескажи) идет агенту
+        _plain_transcribe = bool(_ask) and re.search(r"(транскриб|расшифр|в текст)", _ask.lower()) is not None
+
         # Если голосовое переслано от другого человека — показываем транскрипт напрямую
         is_forwarded = (
             getattr(update.message, "forward_origin", None) is not None or
             getattr(update.message, "forward_from", None) is not None or
             getattr(update.message, "forward_sender_name", None) is not None
         )
-        if is_forwarded:
+        if is_forwarded and (not _ask or _plain_transcribe):
             sender = ""
             origin = getattr(update.message, "forward_origin", None)
             if origin:
@@ -4839,6 +4854,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_photo(photo=img_bytes, caption=tip)
 
         transcript_with_context = f"🎤 {transcript}"
+        if _ask:
+            transcript_with_context = f"{_ask}\n\n[Голосовое{' (переслано)' if is_forwarded else ''}]: {transcript}"
         reply_to = update.message.reply_to_message
         if reply_to:
             reply_text = reply_to.text or reply_to.caption or ""
@@ -4899,6 +4916,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _clear_genimg(user_id)
         await _rc_generate(update, gen_text, gen_img)
         return
+
+    # Просьба про аудио, а само голосовое летит следом отдельным апдейтом («транскрибируй
+    # в текст» + пересланное голосовое). Раньше бот успевал ответить «не вижу аудио»
+    # до голосового (Boris 02.10.2026). Короткую такую просьбу без вложения откладываем
+    # на 4 секунды: голосовое, пришедшее за это время, забирает ее себе.
+    if (user_id not in _media_wait_skip and not update.message.photo and not update.message.document
+            and len(user_text) < 160 and _MEDIA_ASK_RE.search(user_text.lower())):
+        _ts = time.time()
+        _media_wait[user_id] = {"text": user_text, "ts": _ts, "taken": False}
+
+        async def _release_later():
+            await asyncio.sleep(4)
+            w = _media_wait.get(user_id)
+            if not w or w["ts"] != _ts:
+                return
+            _media_wait.pop(user_id, None)
+            if w["taken"]:
+                return
+            _media_wait_skip.add(user_id)
+            try:
+                await handle_message(update, context)
+            finally:
+                _media_wait_skip.discard(user_id)
+        context.application.create_task(_release_later())
+        return
+    _media_wait_skip.discard(user_id)
 
     # В группах — отвечать только на @mention или reply на сообщение бота
     chat_type = update.message.chat.type
