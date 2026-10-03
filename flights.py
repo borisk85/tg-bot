@@ -234,6 +234,7 @@ class FlightsModule:
     URL_CALENDAR = "https://api.travelpayouts.com/v1/prices/calendar"
     URL_V2 = "https://api.travelpayouts.com/v2/prices/latest"
     URL_V1 = "https://api.travelpayouts.com/v1/prices/cheap"
+    URL_V3 = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 
     async def search(self, origin, destination, month, max_price=None,
                      direct_only=False, airline=None, departure_time=None,
@@ -298,10 +299,11 @@ class FlightsModule:
         airline_code = _resolve_airline_code(airline) if airline else None
 
         import asyncio as _asyncio
-        calendar_flights, v2_flights, v1_flights = await _asyncio.gather(
+        calendar_flights, v2_flights, v1_flights, v3_direct = await _asyncio.gather(
             self._fetch_calendar(origin_iata, dest_iata, month, token),
             self._fetch_v2(origin_iata, dest_iata, month, token),
             self._fetch_v1(origin_iata, dest_iata, month, token),
+            self._fetch_v3_direct(origin_iata, dest_iata, month, token),
         )
 
         all_direct_durs = [f["duration"] for f in (v1_flights + v2_flights)
@@ -407,6 +409,12 @@ class FlightsModule:
                 except Exception:
                     _ms2 = month
                 return f"✈️ {origin_iata} → {dest_iata}, {_ms2}\n\nПо этому маршруту актуальных данных нет.\nПопробуй другой месяц или поищи на Aviasales напрямую."
+
+        # Прямые рейсы из v3: старые методы хранят только самый дешевый билет дня, и прямые
+        # крупных авиакомпаний терялись (ALA → SEL, Air Astana и Asiana, 03.10.2026)
+        if v3_direct:
+            _seen = {(f["departure_at"][:10], f.get("airline")) for f in flights if f.get("transfers", 0) == 0}
+            flights = list(flights) + [f for f in v3_direct if (f["departure_at"][:10], f.get("airline")) not in _seen]
 
         if not flights:
             return f"Рейсов {origin_iata} → {dest_iata} в {month} не найдено.\nПопробуй другой месяц или соседние аэропорты."
@@ -565,6 +573,29 @@ class FlightsModule:
                 "airline": info.get("airline", ""), "price": info.get("price", 0),
                 "transfers": info.get("number_of_changes", 0), "departure_at": departure_dt,
                 "departure_hour": _departure_hour(departure_dt), "duration": info.get("duration", 0),
+            })
+        return flights
+
+    async def _fetch_v3_direct(self, origin, destination, month, token) -> list:
+        params = {"origin": origin, "destination": destination, "departure_at": month, "one_way": "true",
+                  "direct": "true", "sorting": "price", "limit": 100, "currency": "usd", "token": token}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(self.URL_V3, params=params)
+            if resp.status_code != 200: return []
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"Flights v3 error: {e}")
+            return []
+        flights = []
+        for info in data.get("data") or []:
+            dep = info.get("departure_at", "")
+            if month and not dep.startswith(month): continue
+            flights.append({
+                "airline": info.get("airline", ""), "price": info.get("price", 0),
+                "transfers": info.get("transfers", 0), "departure_at": dep,
+                "departure_hour": _departure_hour(dep),
+                "duration": info.get("duration_to") or info.get("duration") or 0,
             })
         return flights
 
