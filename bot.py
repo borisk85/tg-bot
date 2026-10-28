@@ -563,6 +563,109 @@ def _is_bare_link(text):
     return not re.search(r"[^\W\d_]", rest, re.UNICODE)
 
 
+def _response_text(response) -> str:
+    """Текст ответа Claude только из блоков text: первым блоком может прийти размышление
+    или вызов инструмента, и content[0].text тогда падает (так сломался маркет-бот в VELA)."""
+    return "".join(
+        (getattr(b, "text", None) or "")
+        for b in (getattr(response, "content", None) or [])
+        if getattr(b, "type", "") == "text"
+    )
+
+
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_M_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+DOC_TEXT_MAX_CHARS = 15000
+
+
+def _omml_text(el) -> str:
+    """Формула Word в линейную запись: дробь (a)/(b), корень √(x), степень x^(n)."""
+    tag = el.tag
+
+    def part(name):
+        child = el.find(_M_NS + name)
+        return _omml_text(child) if child is not None else ""
+
+    if tag == _M_NS + "t":
+        return el.text or ""
+    if tag == _M_NS + "f":
+        return f"({part('num')})/({part('den')})"
+    if tag == _M_NS + "rad":
+        deg = part("deg")
+        return f"{'√[' + deg + ']' if deg else '√'}({part('e')})"
+    if tag == _M_NS + "sSup":
+        return f"{part('e')}^({part('sup')})"
+    if tag == _M_NS + "sSub":
+        return f"{part('e')}_({part('sub')})"
+    if tag == _M_NS + "sSubSup":
+        return f"{part('e')}_({part('sub')})^({part('sup')})"
+    if tag == _M_NS + "d":
+        pr = el.find(_M_NS + "dPr")
+        beg, end = "(", ")"
+        if pr is not None:
+            b, e = pr.find(_M_NS + "begChr"), pr.find(_M_NS + "endChr")
+            if b is not None:
+                beg = b.get(_M_NS + "val", "")
+            if e is not None:
+                end = e.get(_M_NS + "val", "")
+        return beg + ", ".join(_omml_text(x) for x in el.findall(_M_NS + "e")) + end
+    if tag.endswith("Pr"):
+        return ""
+    return "".join(_omml_text(k) for k in el)
+
+
+def _docx_text(file_bytes: bytes) -> str:
+    """Абзацы и таблицы docx по порядку, вместе с формулами. doc.paragraphs отдает только
+    обычный текст абзацев: формулы и таблицы выпадали целиком."""
+    import io
+    from docx import Document
+    doc = Document(io.BytesIO(file_bytes))
+    lines = []
+    for p in doc.element.body.iter(_W_NS + "p"):
+        out = []
+        for el in p.iter():
+            if el.tag == _W_NS + "t":
+                if not any(a.tag in (_M_NS + "oMath", _M_NS + "oMathPara") for a in el.iterancestors()):
+                    out.append(el.text or "")
+            elif el.tag == _W_NS + "tab":
+                out.append("\t")
+            elif el.tag == _M_NS + "oMath":
+                if not any(a.tag == _M_NS + "oMath" for a in el.iterancestors()):
+                    out.append(" " + _omml_text(el) + " ")
+        line = "".join(out).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _xlsx_text(file_bytes: bytes) -> str:
+    """Ячейки xlsx построчно через табуляцию, листы с заголовком."""
+    import io
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    lines = []
+    for sheet in wb.worksheets:
+        if len(wb.worksheets) > 1:
+            lines.append(f"[Лист: {sheet.title}]")
+        for row in sheet.iter_rows(values_only=True):
+            row_text = "\t".join(str(c) if c is not None else "" for c in row)
+            if row_text.strip():
+                lines.append(row_text)
+    return "\n".join(lines) if lines else "[Пустая таблица]"
+
+
+def _remember_failed_turn(user_id: int, user_text: str, reply: str):
+    """Ход с ошибкой тоже идет в историю: без этого на «почему?» после сбоя модель
+    не видит ни вопроса, ни своего ответа (так починено в VELA 10.10.2026)."""
+    try:
+        history = get_history(user_id)
+        history.append({"role": "user", "content": user_text or "[сообщение без текста]"})
+        history.append({"role": "assistant", "content": reply})
+        set_history(user_id, sanitize_tool_pairs(history[-60:]))
+    except Exception as e:
+        logger.warning(f"Отказ не записан в историю {user_id}: {e}")
+
+
 def strip_llm_dashes(text):
     if not text or ("\u2014" not in text and "\u2013" not in text):
         return text
@@ -3637,7 +3740,10 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
             _last = dict(_tools[-1])
             _last["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
             _tools[-1] = _last
-        response = anthropic.messages.create(
+        # Запрос в отдельном потоке: синхронный вызов внутри async останавливал весь бот
+        # на время ответа (напоминания, алерты, другие сообщения), и таймаут 120 с его не прерывал
+        response = await asyncio.to_thread(
+            anthropic.messages.create,
             model="claude-sonnet-4-6",
             max_tokens=4096,
             system=system,
@@ -3938,12 +4044,13 @@ async def send_weekly_ai_digest(context):
 {chr(10).join(raw_data)}"""
 
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        response = client.messages.create(
+        response = await asyncio.to_thread(
+            client.messages.create,
             model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
-        digest_text = response.content[0].text
+        digest_text = _response_text(response)
 
         for i in range(0, len(digest_text), 4096):
             await context.bot.send_message(chat_id=user_id, text=digest_text[i:i + 4096], disable_web_page_preview=True)
@@ -4767,7 +4874,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             import anthropic as _anthropic
             _cleanup_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            _cleanup_resp = _cleanup_client.messages.create(
+            _cleanup_resp = await asyncio.to_thread(
+                _cleanup_client.messages.create,
                 model="claude-haiku-4-5-20251001",
                 max_tokens=2000,
                 messages=[{"role": "user", "content": (
@@ -4781,7 +4889,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"Текст:\n{transcript}"
                 )}]
             )
-            transcript = _cleanup_resp.content[0].text.strip()
+            transcript = _response_text(_cleanup_resp).strip() or transcript
         except Exception as _e:
             logger.warning(f"Transcript cleanup failed: {_e}")
 
@@ -5109,24 +5217,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import base64
             image_data = {"media_type": mime, "data": base64.b64encode(file_bytes).decode()}
         elif mime == "text/plain":
-            text_content = file_bytes.decode("utf-8", errors="ignore")[:4000]
+            text_content = file_bytes.decode("utf-8", errors="ignore")[:DOC_TEXT_MAX_CHARS]
             user_text = f"Содержимое файла {fname}:\n{text_content}\n\n{user_text}".strip()
         elif mime == "application/pdf":
             try:
                 import io
                 from PyPDF2 import PdfReader
                 reader = PdfReader(io.BytesIO(bytes(file_bytes)))
-                text_content = "\n".join(page.extract_text() or "" for page in reader.pages)[:4000]
+                text_content = "\n".join(page.extract_text() or "" for page in reader.pages)[:DOC_TEXT_MAX_CHARS]
+                if not text_content.strip():
+                    text_content = "[В PDF нет текстового слоя, это скан: попроси прислать страницы фотографиями]"
                 user_text = f"Содержимое PDF {fname}:\n{text_content}\n\n{user_text}".strip()
             except Exception:
                 user_text = f"[PDF: {fname}] {user_text}".strip()
-        elif mime in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"):
+        elif mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            # Раньше xlsx уходил модели только именем файла: «[Файл: имя]»
             try:
-                import io
-                from docx import Document
-                doc = Document(io.BytesIO(bytes(file_bytes)))
-                text_content = "\n".join(p.text for p in doc.paragraphs)[:4000]
-                user_text = f"Содержимое документа {fname}:\n{text_content}\n\n{user_text}".strip()
+                text_content = _xlsx_text(bytes(file_bytes))[:DOC_TEXT_MAX_CHARS]
+                user_text = f"Содержимое таблицы {fname}:\n{text_content}\n\n{user_text}".strip()
+            except Exception:
+                user_text = f"[Excel: {fname}] {user_text}".strip()
+        elif mime == "application/vnd.ms-excel":
+            user_text = (f"[Excel: {fname}. Формат .xls (старый Excel) прочитать не могу, попроси "
+                         f"пересохранить как .xlsx] {user_text}").strip()
+        elif mime == "application/msword":
+            # Старый двоичный .doc python-docx не открывает: раньше модель видела только имя файла
+            user_text = (f"[Word: {fname}. Формат .doc (старый Word) прочитать не могу, попроси "
+                         f"пересохранить как .docx или PDF] {user_text}").strip()
+        elif mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            try:
+                text_content = _docx_text(bytes(file_bytes))[:DOC_TEXT_MAX_CHARS]
+                user_text = (f"Содержимое документа {fname} (формулы Word записаны линейно: (a)/(b) дробь, "
+                             f"√(x) корень, x^(n) степень):\n{text_content}\n\n{user_text}").strip()
             except Exception:
                 user_text = f"[Word: {fname}] {user_text}".strip()
         else:
@@ -5150,14 +5272,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_reply(reply, update.message)
     except asyncio.TimeoutError:
         logger.error(f"run_agent TIMEOUT (120s) for user {user_id}, text: {user_text[:100]}")
-        await update.message.reply_text("Запрос занял слишком долго — попробуй еще раз.")
+        _fail = "Запрос занял слишком долго — попробуй еще раз."
+        await update.message.reply_text(_fail)
+        _remember_failed_turn(user_id, user_text, _fail)
     except Exception as e:
-        logger.error(f"Error for user {user_id}: {e}", exc_info=True)
+        logger.error(f"Error for user {user_id}: {type(e).__name__}: {e}", exc_info=True)
         from anthropic import OverloadedError as _OverloadedError
         if isinstance(e, _OverloadedError):
-            await update.message.reply_text("Серверы Claude сейчас перегружены — попробуй через минуту.")
+            _fail = "Серверы Claude сейчас перегружены — попробуй через минуту."
         else:
-            await update.message.reply_text("Произошла ошибка. Попробуй еще раз.")
+            _fail = "Произошла ошибка. Попробуй еще раз."
+        await update.message.reply_text(_fail)
+        _remember_failed_turn(user_id, user_text, _fail)
 
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.inline_query.from_user.id not in ALLOWED_USERS:
