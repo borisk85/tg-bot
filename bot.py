@@ -31,6 +31,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Модели 5.5 (как в VELA с 08.10.2026). У Haiku 5.5 и Sonnet 5.5 размышления включены
+# по умолчанию, а вся обработка ответов здесь рассчитана на ответ без них; Sonnet 5.5
+# режим «disabled» не принимает (400) и выключает размышления режимом between_tools.
+# Правка в одной точке отправки, чтобы не пропустить ни одного вызова.
+MODEL_MAIN = "claude-sonnet-5-5"
+MODEL_FAST = "claude-haiku-5-5"
+_THINKING_OFF = {
+    "claude-haiku-5": {"type": "disabled"},
+    "claude-sonnet-5": {"type": "between_tools"},
+}
+
+
+def _install_model_compat():
+    from anthropic.resources.messages import Messages
+    if getattr(Messages.create, "_tg_compat", False):
+        return
+    _orig = Messages.create
+
+    def create(self, *args, **kwargs):
+        model = str(kwargs.get("model") or "")
+        off = next((v for k, v in _THINKING_OFF.items() if model.startswith(k)), None)
+        if off is not None:
+            for k in ("temperature", "top_p", "top_k"):
+                kwargs.pop(k, None)
+            if "thinking" not in kwargs:
+                extra = dict(kwargs.get("extra_body") or {})
+                extra.setdefault("thinking", dict(off))
+                kwargs["extra_body"] = extra
+        return _orig(self, *args, **kwargs)
+
+    create._tg_compat = True
+    Messages.create = create
+
+
+_install_model_compat()
 anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # ── Redis для хранения истории ────────────────────────────────────────────────
@@ -3744,7 +3779,7 @@ async def run_agent(user_id: int, user_text: str, image_data: dict = None, send_
         # на время ответа (напоминания, алерты, другие сообщения), и таймаут 120 с его не прерывал
         response = await asyncio.to_thread(
             anthropic.messages.create,
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=4096,
             system=system,
             tools=_tools,
@@ -4046,7 +4081,7 @@ async def send_weekly_ai_digest(context):
         client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = await asyncio.to_thread(
             client.messages.create,
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -4876,7 +4911,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _cleanup_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
             _cleanup_resp = await asyncio.to_thread(
                 _cleanup_client.messages.create,
-                model="claude-haiku-4-5-20251001",
+                model=MODEL_FAST,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": (
                     "Исправь ошибки автоматической транскрипции русской речи: "
@@ -5399,7 +5434,7 @@ def _reddit_worthy(title, body):
         return False
     try:
         resp = anthropic.messages.create(
-            model="claude-haiku-4-5-20251001",  # классификация yes/no — Haiku по логике VELA (13.07, чтоб не жрать Sonnet на простом)
+            model=MODEL_FAST,  # классификация yes/no — Haiku по логике VELA (13.07, чтоб не жрать Sonnet на простом)
             max_tokens=5,
             system=(
                 "You filter Reddit posts for a solo AI-native founder. He wants posts where a comment actually ADDS "
@@ -5643,7 +5678,7 @@ def _strip_ai_tells(text):
         return text
     try:
         r = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=400,
             system=("You lightly rewrite a reddit comment so it reads more like a real human and less like AI. "
                     "Keep the meaning and the casual rough tone. If the comment mentions a product name or a URL "
@@ -5687,7 +5722,7 @@ def _downgrade_nonnative(text):
         return text
     try:
         r = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=400,
             system=(
                 "You rewrite an English comment so it reads like it was typed by a B1-B2 non-native speaker (a Russian/"
@@ -5739,7 +5774,7 @@ def _enforce_short(text, max_words=70):
     target = max(20, max_words - 10)
     try:
         r = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=250,
             system=(
                 f"You trim a too-long reddit comment down to about {target} words max (roughly 2-4 short sentences), keeping "
@@ -5765,7 +5800,7 @@ def _describe_image(image_data):
         return ""
     try:
         r = anthropic.messages.create(
-            model="claude-sonnet-4-6",
+            model=MODEL_MAIN,
             max_tokens=300,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": image_data["media_type"],
