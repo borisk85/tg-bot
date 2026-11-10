@@ -3303,7 +3303,7 @@ async def execute_tool(name: str, tool_input: dict, user_id: int = None) -> str:
             url = tool_input["url"]
             logger.info(f"read_webpage: запрос к Firecrawl для {url}, ключ ...{api_key[-4:]}")
             resp = requests.post(
-                "https://api.firecrawl.dev/v1/scrape",
+                "https://api.firecrawl.dev/v2/scrape",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={"url": url, "formats": ["markdown"]},
                 timeout=30
