@@ -5299,7 +5299,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not update.message.document and not update.message.photo and user_id in _pending_doc_text:
         _dts, _dtext = _pending_doc_text.pop(user_id)
-        if _time.time() - _dts < 900:
+        if _time.time() - _dts < 300:
             user_text = f"{_dtext}\n\n{user_text}".strip()
 
     # Подхватить фото из буфера если текущее сообщение без фото
